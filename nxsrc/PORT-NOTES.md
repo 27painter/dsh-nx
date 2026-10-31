@@ -175,6 +175,16 @@ Two changes were kept from that hunt, because they are what made it diagnosable:
 - `nx_create_part` refuses to overwrite, so re-running a test needs a new
   filename.
 
+## NX 2406
+
+Verified on 2406.1700.0.0: the same `nxsrc/` runs unchanged. NX 2406 embeds
+Python 3.10, so every 3.6 workaround here is inert rather than wrong —
+`_compat` is a pass-through above 3.7, the quoted annotations are never
+evaluated, and the stdlib replacements are backwards compatible.
+
+All sixteen tools pass on 2406 as well. `dsh-nx doctor` now reports the embedded
+interpreter and says so, instead of warning that the build is "untested".
+
 ## Licence
 
 Upstream is MIT. This fork keeps `LICENSE` and adds only the compatibility layer described

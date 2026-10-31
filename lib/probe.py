@@ -37,20 +37,53 @@ def file_version(path):
     return "%d.%d.%d.%d" % (ms >> 16, ms & 0xFFFF, ls >> 16, ls & 0xFFFF)
 
 
+def embedded_python(root):
+    """Report the Python NX embeds, e.g. "2.7", "3.6", "3.10".
+
+    NX 12 keeps python36.dll under NXBIN\\python; later builds drop python3NN.dll
+    straight into NXBIN. Matching the pattern covers both without a version list.
+    """
+    for folder in (os.path.join(root, "NXBIN", "python"), os.path.join(root, "NXBIN")):
+        if not os.path.isdir(folder):
+            continue
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            continue
+        for name in sorted(names):
+            low = name.lower()
+            if not low.startswith("python") or not low.endswith(".dll"):
+                continue
+            digits = low[len("python"):-len(".dll")]
+            if digits == "27":
+                return "2.7"
+            if len(digits) == 2 and digits.isdigit():
+                return "%s.%s" % (digits[0], digits[1])
+            if len(digits) == 3 and digits.isdigit():
+                return "%s.%s" % (digits[0], digits[1:])
+    return "unknown"
+
+
+def python_at_least(text, minimum):
+    try:
+        parts = tuple(int(part) for part in text.split("."))
+    except (AttributeError, ValueError):
+        return False
+    return parts >= minimum
+
+
 def probe_root(root):
     if not root or not os.path.isdir(root):
         return None
     run_journal = os.path.join(root, "NXBIN", "run_journal.exe")
     ugraf = os.path.join(root, "NXBIN", "ugraf.exe")
-    py36 = os.path.join(root, "NXBIN", "python", "python36.dll")
-    py27 = os.path.join(root, "NXBIN", "python27.dll")
     if not os.path.isfile(run_journal):
         return None
     return {
         "root": root,
         "run_journal": run_journal,
         "version": file_version(ugraf) if os.path.isfile(ugraf) else None,
-        "nxopen_python": "3.6" if os.path.isfile(py36) else ("2.7" if os.path.isfile(py27) else "unknown"),
+        "nxopen_python": embedded_python(root),
     }
 
 
@@ -75,8 +108,10 @@ def main():
     version = found["version"] or ""
     found["installed"] = True
     found["is_nx12"] = version.startswith("12.")
-    # The skill was written and validated on NX 12; anything else is unproven.
-    found["supported"] = found["is_nx12"] and found["nxopen_python"] == "3.6"
+    # The ported bridge targets Python 3.6 and runs unchanged on newer builds,
+    # so the requirement is the interpreter, not the NX release. Verified on
+    # 12.0.0.27 (3.6) and 2406.1700 (3.10).
+    found["supported"] = python_at_least(found["nxopen_python"], (3, 6))
     print(json.dumps(found))
 
 

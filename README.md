@@ -75,7 +75,7 @@ dsh-nx bridge-stop      # ask the bridge to stop
 
 ## What is verified
 
-Verified on NX 12.0.0.27 on Windows 11:
+Verified on **NX 12.0.0.27 (Python 3.6.1)** and **NX 2406.1700 (Python 3.10)** on Windows 11:
 
 - the ported modules import inside NX 12's 3.6.1, and `NXOpen` answers (`UGII_VERSION: v12`);
 - the bridge starts, authenticates, answers `nx_status` with `connected: true`, and stops cleanly;
@@ -85,7 +85,7 @@ Verified on NX 12.0.0.27 on Windows 11:
 - in dsh itself, with the bridge already up, the model called `mcp__nx__nx_status` and got
   `connected: true`.
 
-**All sixteen tools work** on 12.0.0.27: part, sketch, rectangle, line, finish, extrude, undo,
+**All sixteen tools work** on both 12.0.0.27 and 2406.1700: part, sketch, rectangle, line, finish, extrude, undo,
 the three list tools, STEP export, save, close, fit and open. `nxsrc/PORT-NOTES.md` records the
 3.6/3.9 gaps the runs exposed and the two diagnostics kept from finding them.
 

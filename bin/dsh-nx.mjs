@@ -99,7 +99,13 @@ function cmdDoctor() {
     say("nx        not found (set UGII_BASE_DIR or NX_HOME)");
   } else {
     say(`nx        ${nx.root}  version ${nx.version || "unknown"}  NXOpen Python ${nx.nxopen_python}`);
-    if (!nx.supported) say("nx        this build is not NX 12 with Python 3.6 — the skill is untested there");
+    if (!nx.supported) {
+      say(`nx        needs Python 3.6 or newer inside NX; this build embeds ${nx.nxopen_python}`);
+    } else if (!nx.is_nx12) {
+      // Later builds embed 3.10+, so the ported bridge runs unchanged and
+      // upstream would work here too.
+      say(`nx        Python ${nx.nxopen_python} inside NX — the ported bridge runs unchanged, no 3.6 shims needed`);
+    }
   }
   const venv = venvPython(layout);
   say(`venv-nx   ${exists(venv) ? venv : "missing (run: dsh-nx install)"}`);
