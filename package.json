@@ -1,0 +1,49 @@
+{
+  "name": "dsh-nx",
+  "version": "0.1.0",
+  "description": "Siemens NX 12 for dsh and Codex: installs a pinned NXOpen journal skill and wraps run_journal.exe so an agent can tell success from failure.",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "bin": {
+    "dsh-nx": "bin/dsh-nx.mjs"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "nxsrc/",
+    "cordis.patch.yml",
+    "install.ps1",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "siemens-nx",
+    "ug-nx",
+    "nxopen",
+    "cad"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "os": [
+    "win32"
+  ],
+  "devDependencies": {
+    "@deepseek-ai/dsh-mcp-client": "0.2.0-rc.2"
+  },
+  "scripts": {
+    "check": "node bin/dsh-nx.mjs doctor",
+    "test": "node test/plugin.test.mjs"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-mcp-client": ">=0.2.0-rc.1 <0.3.0-0"
+  }
+}

@@ -1,0 +1,62 @@
+name: check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Parse the JavaScript
+        run: |
+          node --check lib/index.js
+          node --check lib/paths.mjs
+          node --check bin/dsh-nx.mjs
+
+      # The bridge runs inside NX 12, which embeds CPython 3.6.1. Parse the
+      # shipped sources against that grammar so a 3.7+ construct fails here
+      # rather than on a machine with NX installed.
+      - name: Ported sources must parse as Python 3.6
+        run: |
+          python - <<'PY'
+          import ast, pathlib, sys
+          bad = []
+          for path in sorted(pathlib.Path("nxsrc").rglob("*.py")):
+              if path.name == "server.py":
+                  continue  # sidecar, runs on the host interpreter
+              try:
+                  ast.parse(path.read_text(encoding="utf-8"), filename=str(path), feature_version=(3, 6))
+              except SyntaxError as exc:
+                  bad.append("%s:%s %s" % (path, exc.lineno, exc.msg))
+          print("\n".join(bad) if bad else "all ported modules parse as 3.6")
+          sys.exit(1 if bad else 0)
+          PY
+
+      - name: Compile the helper scripts
+        run: |
+          python -m py_compile lib/probe.py
+
+      - name: Resolve paths without NX installed
+        run: node bin/dsh-nx.mjs where
+
+      - name: Pack
+        run: npm pack --dry-run
+
+      - name: Install the dev dependencies
+        run: npm install --no-audit --no-fund
+
+      # Without the install above this test would print SKIP and exit 0 —
+      # a green run that verified nothing.
+      - name: Plugin registration logic
+        run: node test/plugin.test.mjs

@@ -1,0 +1,5 @@
+# dsh-nx -- one row: this package. The plugin registers the MCP server itself,
+# so nothing has to be on PATH and no absolute path is baked in here.
+- insert:
+    - id: dsh-nx
+      name: dsh-nx
