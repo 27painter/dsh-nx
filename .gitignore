@@ -1,0 +1,14 @@
+node_modules/
+package-lock.json
+*.tgz
+*.log
+
+# Python bytecode -- the bridge must never ship .pyc for a 3.6 interpreter
+__pycache__/
+*.pyc
+*.pyo
+
+# NX test output
+*.prt
+*.step
+*.log
