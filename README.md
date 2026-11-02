@@ -4,20 +4,19 @@ English | [中文](README.zh.md)
 
 > Other NX MCP servers tell the agent what to do. **dsh-nx tells it whether it actually worked.**
 
-Drive Siemens NX **12, 2406 and 2506** from a DeepSeek Harness agent. The oldest of the three is the
-one no other NX bridge supports: the upstream project requires Python 3.10+ and NX 12 embeds 3.6.1.
+Drive Siemens NX **2406 and 2506** from a DeepSeek Harness agent — and **NX 12** as well, the release
+the upstream bridge cannot reach at all, because it needs Python 3.10+ and NX 12 embeds 3.6.1.
 
 NXOpen runs inside NX, so automation means starting a batch NX and running a journal inside it. This
-repository is the NX 12 implementation of that: the bridge ported to the interpreter NX 12 actually
-ships, an executor that reports whether the journal did what it was asked, and a probe that keeps
-three releases apart. Nothing else in this space covers NX 12, because nothing else can.
+repository is that runtime: one codebase across the three releases, an executor that reports whether
+the journal did what it was asked, and a probe that keeps the releases apart.
 
 ## What was missing, and what this adds
 
 | capability | before | here |
 |---|---|---|
-| automate **NX 12** | the upstream bridge requires Python 3.10+; NX 12 embeds 3.6.1, so it does not run | 1,785 lines ported across five modules; NX 12 runs the same 16 tools |
 | know whether a run **worked** | `run_journal.exe` returns `0` for a journal that swallowed its own exception | `run-journal`: verdict from the log, process-tree kill on timeout, JSON with the reasons |
+| one runtime across **2406, 2506 and 12** | the upstream bridge requires Python 3.10+, so NX 12 is out of reach and every release needs its own setup | 1,785 lines ported down to 3.6.1 and shimmed forward; one codebase, 16 tools on all three |
 | know **which NX** is on the machine | read the registry, or guess | `probe.py`: every install, its interpreter, and a `verified` / `expected` label |
 | **install** it | clone, venv, junctions, `NX_HOME`, licence dirs, by hand | `install.ps1` + `doctor`, which names the one thing that is wrong |
 | NXOpen knowledge for an agent | a skill pinned to NX 12, with the release baked into the text | the same skill, with the interpreter guidance and API checks following the release |
@@ -110,9 +109,9 @@ Everything below is scoped by this table.
 
 | | state |
 |---|---|
-| NX 12 (12.0.0.27, CPython 3.6.1) | the 16 tools, the skill and `run-journal` all ran on a real part |
-| NX 2406 (2406.1700, CPython 3.10) | same, plus both worked examples end to end |
+| NX 2406 (2406.1700, CPython 3.10) | **the reference release.** 16 tools, the skill, `run-journal`, and all four worked examples end to end |
 | NX 2506 (CPython 3.12) | **never run.** Parses and imports under 3.12; the probe labels it `expected`, not `verified` |
+| NX 12 (12.0.0.27, CPython 3.6.1) | 16 tools, the skill and `run-journal` on a real part; the worked examples were not re-run here |
 | the 16 MCP tools | modelling and export only — **no Drafting**: no view projection, dimension, title block, GB frame or PDF |
 | driving an NX window you already have open | **not possible**, by design of NXOpen |
 | the package on npm | not published |
@@ -128,10 +127,10 @@ Two constraints shape every decision here:
 the NX you have open. The options are "start our own batch NX" or "run the journal by hand"; every
 route here takes the first one, which is also why NX is busy while the resident bridge is up.
 
-**NX releases do not share a Python.** 12 embeds CPython 3.6.1, 2406 embeds 3.10, 2506 embeds 3.12.
-Upstream targeted the newest of those and left the oldest — the one most seats still have — with no
-automation path. The port is written against 3.6.1 and shims forward, so a newer release executes the
-same code with the shims inert.
+**NX releases do not share a Python.** 2406 embeds CPython 3.10, 2506 embeds 3.12, and 12 — still in
+service — embeds 3.6.1. Writing for the newest leaves the oldest with no automation path, which is the
+state the upstream bridge is in. This port is written against 3.6.1 and shims forward, so 2406 and 2506
+execute the same code with the shims inert, and NX 12 runs it too.
 
 ## What is in the box
 
@@ -275,13 +274,14 @@ licence paths.
 
 ## How this was tested
 
-| | NX 12.0.0.27 | NX 2406.1700 |
+| | NX 2406.1700 | NX 12.0.0.27 |
 |---|---|---|
-| five in-NX modules import | 3.6.1 | 3.10 |
-| bridge starts, `nx_status` answers | `connected: true`, `v12` | `connected: true`, `v2406` |
+| five in-NX modules import | 3.10 | 3.6.1 |
+| bridge starts, `nx_status` answers | `connected: true`, `v2406` | `connected: true`, `v12` |
 | 16 tools | pass | pass |
-| `examples/a_model.py` | — | pass, `.prt` written |
-| `examples/b_drawing.py` | — | 17.9 s; `.prt` 204 KB, `.pdf` 48 KB, `.stl` 67 KB |
+| `examples/quickcheck.py` | 125000 mm³ in 21.6 s cold, 10.8 s warm | — |
+| `examples/a_model.py` | pass, `.prt` written | — |
+| `examples/b_drawing.py` | 17.9 s; `.prt` 204 KB, `.pdf` 48 KB, `.stl` 67 KB | — |
 
 The verdict logic was checked against four journals on 2406. Each must produce a different answer from
 the same code path, or the logic is not doing anything:
