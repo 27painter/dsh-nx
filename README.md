@@ -76,6 +76,10 @@ Same version as the dsh that will load it, so nothing is pinned behind dsh's bac
 `node -e "import('dsh-nx').then(m => console.log(Object.keys(m)))"` from the profile folder — it
 should print `apply, inject, name`.
 
+`doctor` prints `loaded` when the running copy is reached through a link, and names any other copy
+it finds on disk (`also found: …`). Two copies of the same bundle is how a fix "does not apply":
+one of them is still the old code.
+
 ## Using the skill
 
 Nothing to do — the skill appears in `~/.dsh/skills` and dsh loads it when a request mentions NX. Say what you want:
@@ -93,20 +97,38 @@ and for anyone who has a journal in hand and wants a verdict rather than a wall 
 
 ```powershell
 dsh-nx run-journal .\part.py                       # workdir = the journal's folder
-dsh-nx run-journal .\part.py -w .\build -t 600     # explicit workdir and timeout
+dsh-nx run-journal .\part.py -w .\build -t 900     # explicit workdir and timeout (default 600)
 dsh-nx run-journal .\part.py --expect DRAWING_OK   # require a token in the output
+dsh-nx run-journal .\part.py --allow-traceback     # the journal catches and logs exceptions
+dsh-nx run-journal .\part.py --log run1.log        # a different log file
 dsh-nx run-journal .\part.py --json                # machine-readable verdict
 dsh-nx run-journal .\part.py --print-command       # show the command and env, run nothing
 ```
 
 It resolves the NX root (`NX_HOME`, then the recorded layout, then the probe), calls
-`UGII\ugiicmd.bat` first so the licence environment is set up, tees the output to
+`UGII\ugiicmd.bat` first so the licence environment is set up, writes the output to
 `<workdir>\<journal>.log`, and kills the process tree on timeout.
 
+**The output goes to a file descriptor, not a pipe.** A pipe needs a kernel handle some sandboxes
+refuse (`spawn EPERM`), and it would have to be teed into a log anyway. One descriptor is the whole
+path: the child writes, the log grows, and the console shows a tail of it.
+
+**The log is appended, and only the new bytes are judged.** Re-running keeps the evidence from the
+failed attempt, and the earlier `Traceback` cannot decide the later run.
+
 **The exit code is not the verdict.** NX batch exits `0xC0000409` after a clean journal, and a
-journal that swallows its own exception still exits `0`. So the verdict comes from the log —
-`Traceback`, `General Fault Exception`, `failed to initialize UFUN`, `NXException`, `_FAIL` — plus
-whatever `--expect` / `--fail-on` you add, and the exit code only decides when nothing else did.
+journal that swallows its own exception still exits `0`. So the verdict comes from the log:
+
+| signal | verdict |
+|---|---|
+| `General Fault Exception`, `failed to initialize UFUN`, `FATAL ERROR`, `_FAIL`, `BRIDGE_FAIL` | fail |
+| `Traceback`, `NXException` | fail by default, **warning** with `--allow-traceback` |
+| `--expect TOKEN` not found | fail |
+| exit code outside `0` / `0xC0000409` | fail, unless something above already did |
+
+`--allow-traceback` exists because the house style for a journal is `try/except` per step plus a
+traceback in the log — a healthy run of a robust journal contains one. Without it, a caught
+exception reads as failure; with it, a real crash still fails on `General Fault Exception`.
 
 `UGII_USER_PROFILE_DIR` and `UGII_TMP_DIR` are pointed at `<workdir>\.nx-profile` and
 `<workdir>\.nx-tmp`. NX otherwise writes into `%LOCALAPPDATA%\Siemens` and `%TEMP%`, which is
@@ -120,11 +142,23 @@ Running it from a sandboxed agent needs three paths outside the workspace:
 | `<NX_HOME>` | read | the install and `ugiicmd.bat` |
 | `<workdir>` | read/write | parts, log, `.nx-profile`, `.nx-tmp` |
 
-`examples/smoke.py` is the smallest journal that proves a machine can run one:
+### Examples
+
+| journal | what it does |
+|---|---|
+| `examples/smoke.py` | smallest thing that proves a machine can run one — prints the interpreter, imports `NXOpen`, prints `SMOKE_OK` |
+| `examples/a_model.py` | a full part: boss + bore + keyway + pocket + holes, with body-count assertions per step; writes `sw_model.prt` |
+| `examples/b_drawing.py` | GB A3 drawing of that part: three views at 2:1, 12 dimensions, frame, title block, notes, PDF; needs the skill installed (it imports `gb_drawing` and `nxlib`) |
 
 ```powershell
 dsh-nx run-journal examples\smoke.py --expect SMOKE_OK
+dsh-nx run-journal examples\a_model.py --expect MODEL_DONE
+dsh-nx run-journal examples\b_drawing.py --expect DRAWING_DONE --allow-traceback
 ```
+
+Both of the larger examples were run end to end on NX 2406 — 17.9 s for the drawing, 204 KB `.prt`,
+48 KB `.pdf`, 67 KB `.stl`. `b_drawing.py` resolves the skill from `NXOPEN_JOURNAL_SKILL` or
+`~/.dsh/skills`; nothing is pinned to one machine.
 
 **An NX that is already open cannot be driven.** NXOpen runs in-process, so there is no external
 handle into the GUI session — `run-journal` and the bridge both start their own batch NX. If you
@@ -194,6 +228,8 @@ verdict from the same code path:
 | `examples/smoke.py` | ok | `verdict: ok`, 10.1 s, exit `0xC0000409` treated as clean |
 | one that raises | fail | `uncaught exception (log contains "Traceback …")`, exit 1 |
 | one that sleeps past `--timeout 5` | fail | `timeout: NX did not exit in time`, killed at 5.2 s |
+| one that catches an exception and still finishes | fail, then ok | `Traceback` is a reason by default, a warning under `--allow-traceback` |
+| the same journal run twice into one log | ok both times | 2 records in the file, second run judged only on its own bytes |
 
 The skill route does not depend on any of this: `run_journal_batch.bat` was verified end to end,
 writing a journal result file from a batch NX started with the `NX_HOME` that `install` sets.

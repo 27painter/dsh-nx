@@ -7,8 +7,10 @@
 // interpreter NX embeds -- 3.6 / 3.10 / 3.12 -- which is what `doctor` reports.
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { PKG, PKG_ROOT, exists, resolveLayout, configPath } from "../lib/paths.mjs";
+import { explainMissingNx, probeNx } from "../lib/nx-root.mjs";
 import { parseRunJournalArgs, runJournal } from "../lib/run-journal.mjs";
 
 const LOG = "[dsh-nx]";
@@ -20,6 +22,38 @@ const JOURNAL = path.join(NXSRC, "bridge_journal.py");
 function die(msg) {
   say(msg);
   process.exit(1);
+}
+
+function realpathOr(target) {
+  try {
+    return fs.realpathSync(target);
+  } catch {
+    return target;
+  }
+}
+
+// Every place a `dsh-nx` can be loaded from, other than the one running now.
+// Two copies with the same name is how a fix "does not apply" — one of them is
+// still the old code.
+function otherCopies() {
+  const here = realpathOr(PKG_ROOT).toLowerCase();
+  const profiles = path.join(os.homedir(), ".dsh", "profiles");
+  const candidates = [path.join(profiles, "node_modules", "dsh-nx")];
+  try {
+    for (const entry of fs.readdirSync(profiles, { withFileTypes: true })) {
+      if (entry.isDirectory()) candidates.push(path.join(profiles, entry.name, "node_modules", "dsh-nx"));
+    }
+  } catch {
+    // no profiles folder: nothing to compare against
+  }
+  const found = [];
+  for (const candidate of candidates) {
+    if (!exists(candidate)) continue;
+    const real = realpathOr(candidate);
+    if (real.toLowerCase() === here) continue;
+    found.push(real);
+  }
+  return found;
 }
 
 // A descriptor file survives the NX process that wrote it, so existence is not
@@ -83,26 +117,24 @@ function cmdInstall() {
   say(`recorded ${configPath()}`);
 }
 
-// ------------------------------------------------------------------ probe
-function probe(layout) {
-  const script = path.join(PKG_ROOT, "lib", "probe.py");
-  const python = exists(venvPython(layout)) ? venvPython(layout) : layout.python;
-  const res = spawnSync(python, [script], { encoding: "utf8", timeout: 30000 });
-  if (res.status !== 0 || !res.stdout) return null;
-  try {
-    return JSON.parse(res.stdout.trim().split("\n").pop());
-  } catch {
-    return null;
-  }
-}
-
 // ----------------------------------------------------------------- doctor
 function cmdDoctor() {
   const layout = resolveLayout();
-  const nx = probe(layout);
+  const nx = probeNx(layout);
   say(`package   ${PKG_ROOT} (v${PKG.version})`);
+  // PKG_ROOT is this file's parent. When the bundle is loaded through a profile
+  // junction that is a different folder from the one on disk, and "which copy
+  // am I running" is the first question when a fix seems not to apply.
+  const loaded = realpathOr(PKG_ROOT);
+  if (loaded.toLowerCase() !== PKG_ROOT.toLowerCase()) {
+    say(`loaded    ${loaded}  (via a link)`);
+  }
+  const copies = otherCopies(layout);
+  if (copies.length) {
+    say(`loaded    also found: ${copies.join("; ")} — a second copy drifts out of date; point both at one folder`);
+  }
   if (!nx || !nx.installed) {
-    say("nx        not found (set UGII_BASE_DIR or NX_HOME)");
+    say(`nx        not found: ${explainMissingNx(layout, nx)}`);
   } else {
     say(`nx        ${nx.root}  version ${nx.version || "unknown"}  NXOpen Python ${nx.nxopen_python}  [${nx.support}]`);
     say(`nx        ${nx.support_note}`);
@@ -313,8 +345,8 @@ switch (cmd) {
     console.error(
       "usage: dsh-nx <install|doctor|where|serve|run-journal|bridge-start|bridge-stop|version>\n" +
         "       dsh-nx run-journal <journal.py> [--workdir DIR] [--timeout SEC]\n" +
-        "                         [--expect TOKEN]... [--fail-on REGEX]... [--json] [--quiet]\n" +
-        "                         [--print-command]",
+        "                         [--expect TOKEN]... [--fail-on REGEX]... [--log FILE]\n" +
+        "                         [--allow-traceback] [--json] [--quiet] [--print-command]",
     );
     process.exit(2);
 }
