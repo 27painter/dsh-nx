@@ -5,15 +5,21 @@ the Python 3.6 subset, so they run unchanged on NX 12, 2406 and 2506.
 
 | file | what it proves | success token |
 |---|---|---|
+| `quickcheck.py` | NXOpen did geometry: builds a 50 mm block and measures 125000 mm³ | `QUICKCHECK_OK` |
 | `smoke.py` | the machine can run a journal at all — prints the interpreter, imports `NXOpen` | `SMOKE_OK` |
 | `a_model.py` | a full part: boss, bore, keyway, pocket, holes, with body-count assertions per step | `MODEL_DONE` |
 | `b_drawing.py` | GB A3 drawing of that part: three views at 2:1, 12 dimensions, frame, title block, PDF | `DRAWING_PRODUCTS_OK` |
 
 ```powershell
+dsh-nx run-journal examples\quickcheck.py --expect QUICKCHECK_OK -w D:\nx-work
 dsh-nx run-journal examples\smoke.py --expect SMOKE_OK
-dsh-nx run-journal examples\a_model.py --expect MODEL_DONE
-dsh-nx run-journal examples\b_drawing.py --expect DRAWING_PRODUCTS_OK --allow-traceback
+dsh-nx run-journal examples\a_model.py --expect MODEL_DONE -w D:\nx-work
+dsh-nx run-journal examples\b_drawing.py --expect DRAWING_PRODUCTS_OK -w D:\nx-work --allow-traceback
 ```
+
+`quickcheck.py` is the one to run first: it is the only example that fails when the geometry is
+wrong rather than when NX fails to start. About 20 s cold, 11 s warm, and its `.prt` lands in
+`--workdir` (`NX_MCP_WORKSPACE`), not next to the journal.
 
 ## What they need
 

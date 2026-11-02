@@ -2,6 +2,8 @@
 
 English | [中文](README.zh.md)
 
+> Other NX MCP servers tell the agent what to do. **dsh-nx tells it whether it actually worked.**
+
 Drive Siemens NX **12, 2406 and 2506** from a DeepSeek Harness agent. The oldest of the three is the
 one no other NX bridge supports: the upstream project requires Python 3.10+ and NX 12 embeds 3.6.1.
 
@@ -44,6 +46,26 @@ dsh-nx doctor               # read-only; exit 1 when something is missing
 ```
 
 The package is not on npm, so `npm install -g dsh-nx` does not resolve.
+
+### The check that matters
+
+A cube, a volume, a verdict. If this prints `OK`, NXOpen did real geometry on this machine — which is
+the claim everything else rests on:
+
+```powershell
+dsh-nx run-journal examples\quickcheck.py --expect QUICKCHECK_OK -w D:\nx-work
+```
+
+```
+CUBE_EDGE=50.0
+VOLUME=125000.000
+QUICKCHECK_OK
+[dsh-nx] OK  10.8s
+```
+
+It builds a 50 mm block, asks `MeasureManager` for the volume, and fails the run if the number is not
+125000 mm³. About 20 s cold (NX has to start) and 11 s warm. `examples/smoke.py` is the same check
+without the geometry, for when you only want to know whether NX starts at all.
 
 At this point the **skill** works. The **MCP tools** also need the plugin row below.
 
@@ -109,7 +131,7 @@ same code with the shims inert.
 | `lib/capture.mjs` | 74 | runs a child through a file descriptor instead of a pipe |
 | `lib/nx-root.mjs` + `lib/paths.mjs` | 77 + 71 | one resolver for "which NX", and the layout defaults |
 | `install.ps1` | 155 | venv, the pinned skill, the junctions, `NX_HOME` |
-| `examples/` | 3 journals | a smoke test, a part, and a GB A3 drawing of that part |
+| `examples/` | 4 journals | a volume check, a smoke test, a part, and a GB A3 drawing of that part |
 
 Original code in `bin/`, `lib/` and `install.ps1`: 1,402 lines.
 
@@ -132,6 +154,24 @@ wait for a CAD application.
 
   agent ──nx_* tools──▶ dsh-nx plugin ──stdio──▶ sidecar (venv-nx) ──loopback──▶ batch NX
 ```
+
+## Worked examples
+
+| journal | what it proves | success token |
+|---|---|---|
+| `examples/quickcheck.py` | NXOpen did geometry: a 50 mm block whose measured volume is 125000 mm³ | `QUICKCHECK_OK` |
+| `examples/smoke.py` | the machine can run a journal at all | `SMOKE_OK` |
+| `examples/a_model.py` | a full part — boss, bore, keyway, pocket, holes — with body-count assertions per step | `MODEL_DONE` |
+| `examples/b_drawing.py` | GB A3 drawing of that part: three views at 2:1, 12 dimensions, frame, title block, PDF | `DRAWING_PRODUCTS_OK` |
+
+```powershell
+dsh-nx run-journal examples\quickcheck.py --expect QUICKCHECK_OK -w D:\nx-work
+dsh-nx run-journal examples\a_model.py --expect MODEL_DONE -w D:\nx-work
+dsh-nx run-journal examples\b_drawing.py --expect DRAWING_PRODUCTS_OK -w D:\nx-work --allow-traceback
+```
+
+[`examples/README.md`](examples/README.md) lists what each one needs: a licence seat, a writable
+workdir, and for the drawing one, the part from the previous step.
 
 ## `run-journal`
 

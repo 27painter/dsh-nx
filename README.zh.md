@@ -2,6 +2,8 @@
 
 [English](README.md) | 中文
 
+> 别的 NX MCP 告诉 agent 该做什么，**dsh-nx 告诉它到底做成了没有。**
+
 让 DeepSeek Harness 的 agent 驱动 Siemens NX **12、2406 与 2506**。三者里最老的那个，正是别的 NX 桥
 都支持不了的：上游项目要求 Python 3.10+，而 NX 12 内嵌 3.6.1。
 
@@ -41,6 +43,25 @@ dsh-nx doctor               # 只读；缺东西时退出码 1
 ```
 
 包还没发到 npm，所以 `npm install -g dsh-nx` 现在解析不到。
+
+### 真正说明问题的那一步
+
+一个立方体、一个体积、一个判定。这条命令打出 `OK`，就说明 NXOpen 在这台机器上真的做出了几何——
+后面所有说法都建立在这件事上：
+
+```powershell
+dsh-nx run-journal examples\quickcheck.py --expect QUICKCHECK_OK -w D:\nx-work
+```
+
+```
+CUBE_EDGE=50.0
+VOLUME=125000.000
+QUICKCHECK_OK
+[dsh-nx] OK  10.8s
+```
+
+它建一个 50 mm 的方块，向 `MeasureManager` 要体积，数字不是 125000 mm³ 就判失败。冷启动约 20 秒
+（要等 NX 起来），热启动 11 秒。`examples/smoke.py` 是同一件事但不要几何，只想确认 NX 能不能起时用它。
 
 到这里**技能**就能用了。要用 **MCP 工具**，还得做下面的插件行。
 
@@ -104,7 +125,7 @@ New-Item -ItemType Junction -Path $dst -Target $src
 | `lib/capture.mjs` | 74 | 用文件描述符而不是管道跑子进程 |
 | `lib/nx-root.mjs` + `lib/paths.mjs` | 77 + 71 | 「用哪个 NX」只有一处实现，以及布局默认值 |
 | `install.ps1` | 155 | venv、pinned 技能、junction、`NX_HOME` |
-| `examples/` | 3 个 journal | 冒烟、零件、以及这个零件的 GB A3 工程图 |
+| `examples/` | 4 个 journal | 体积自检、冒烟、零件、以及这个零件的 GB A3 工程图 |
 
 `bin/`、`lib/`、`install.ps1` 里的自有代码合计 1,402 行。
 
@@ -126,6 +147,24 @@ New-Item -ItemType Junction -Path $dst -Target $src
 
   agent ──nx_* 工具──▶ dsh-nx 插件 ──stdio──▶ sidecar（venv-nx）──回环──▶ 批处理 NX
 ```
+
+## 示例
+
+| journal | 证明什么 | 成功 token |
+|---|---|---|
+| `examples/quickcheck.py` | NXOpen 真的做出了几何：50 mm 方块，量出 125000 mm³ | `QUICKCHECK_OK` |
+| `examples/smoke.py` | 这台机器能不能跑 journal | `SMOKE_OK` |
+| `examples/a_model.py` | 一个完整零件——凸台、通孔、键槽、台阶腔、孔——每步体数断言 | `MODEL_DONE` |
+| `examples/b_drawing.py` | 这个零件的 GB A3 工程图：2:1 三视图、12 个尺寸、图框标题栏、PDF | `DRAWING_PRODUCTS_OK` |
+
+```powershell
+dsh-nx run-journal examples\quickcheck.py --expect QUICKCHECK_OK -w D:\nx-work
+dsh-nx run-journal examples\a_model.py --expect MODEL_DONE -w D:\nx-work
+dsh-nx run-journal examples\b_drawing.py --expect DRAWING_PRODUCTS_OK -w D:\nx-work --allow-traceback
+```
+
+每个示例需要什么——许可席位、可写 workdir、出图那个还要上一步的零件——写在
+[`examples/README.md`](examples/README.md)。
 
 ## `run-journal`
 
