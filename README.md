@@ -2,8 +2,8 @@
 
 English | [中文](README.zh.md)
 
-Drive Siemens NX from a DeepSeek Harness agent — **including NX 12**, which the existing NX bridge
-cannot run on at all.
+Drive Siemens NX **12, 2406 and 2506** from a DeepSeek Harness agent. The oldest of the three is the
+one no other NX bridge supports: the upstream project requires Python 3.10+ and NX 12 embeds 3.6.1.
 
 NXOpen runs inside NX, so automation means starting a batch NX and running a journal inside it. This
 repository is the NX 12 implementation of that: the bridge ported to the interpreter NX 12 actually

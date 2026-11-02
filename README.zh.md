@@ -2,7 +2,8 @@
 
 [English](README.md) | 中文
 
-让 DeepSeek Harness 的 agent 驱动 Siemens NX——**包括 NX 12**，而现有的那个 NX 桥根本跑不了 NX 12。
+让 DeepSeek Harness 的 agent 驱动 Siemens NX **12、2406 与 2506**。三者里最老的那个，正是别的 NX 桥
+都支持不了的：上游项目要求 Python 3.10+，而 NX 12 内嵌 3.6.1。
 
 NXOpen 跑在 NX 进程内，所以自动化的唯一办法是起一个批处理 NX、把 journal 放进去跑。这个仓库就是
 这件事在 NX 12 上的实现：把桥移植到 NX 12 真正内嵌的那个解释器；一个能告诉你「这次到底成没成」的
