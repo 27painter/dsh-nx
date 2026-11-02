@@ -47,6 +47,20 @@ dsh-nx doctor               # read-only; exit 1 when something is missing
 
 The package is not on npm, so `npm install -g dsh-nx` does not resolve.
 
+### Before you start
+
+- **You do not need to open NX, and opening it does not help.** Every route starts its own batch NX
+  through `run_journal.exe`; an NX window you already have open cannot be driven, because NXOpen runs
+  inside the process. The window is not reused and not seen.
+  This is the opposite of [`dsh-sw-cad`](https://github.com/27painter/dsh-sw-cad), which drives
+  AutoCAD and SolidWorks over COM and therefore *does* want the application already open.
+- `NX_HOME` should point at the install you mean — `dsh-nx doctor` prints which one it picked and why.
+- **A free licence seat.** A batch NX takes one for as long as it runs. Whether an open NX window also
+  holds one depends on your licence; if runs stop at `failed to initialize UFUN 948792`, close it and
+  retry before suspecting anything else.
+- **A writable workdir** (`-w`), since the default is the journal's own folder — read-only when the
+  bundle is loaded out of a profile junction.
+
 ### The check that matters
 
 A cube, a volume, a verdict. If this prints `OK`, NXOpen did real geometry on this machine — which is

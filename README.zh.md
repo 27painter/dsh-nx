@@ -44,6 +44,18 @@ dsh-nx doctor               # 只读；缺东西时退出码 1
 
 包还没发到 npm，所以 `npm install -g dsh-nx` 现在解析不到。
 
+### 开始之前
+
+- **不需要先打开 NX，打开也没用。** 每条路都是通过 `run_journal.exe` 自己起一个批处理 NX；你已经打开
+  的那个窗口驱动不了，因为 NXOpen 跑在进程内。那个窗口不会被复用，也不会被看见。
+  这和 [`dsh-sw-cad`](https://github.com/27painter/dsh-sw-cad) 恰好相反——它走 COM 驱动 AutoCAD 与
+  SolidWorks，所以**确实**希望那两个应用已经开着。
+- `NX_HOME` 要指向你想用的那份安装——`dsh-nx doctor` 会打印它选了哪个、依据是什么。
+- **一个空闲的许可席位。** 批处理 NX 跑多久就占多久。已经开着的 NX 窗口是否也占席位取决于你的许可
+  类型；如果运行停在 `failed to initialize UFUN 948792`，先把它关掉重试，再怀疑别的地方。
+- **一个可写的 workdir**（`-w`），因为默认是 journal 所在目录——当插件是从 profile junction 加载时，
+  那个目录是只读的。
+
 ### 真正说明问题的那一步
 
 一个立方体、一个体积、一个判定。这条命令打出 `OK`，就说明 NXOpen 在这台机器上真的做出了几何——
