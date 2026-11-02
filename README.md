@@ -245,6 +245,7 @@ each interpreter.
 
 ## Licence
 
-MIT, Copyright (c) 2026 27painter — see [LICENSE](LICENSE). `nxsrc/` keeps upstream's licence at
-[`nxsrc/LICENSE-DreamEnding-NX_MCP`](nxsrc/LICENSE-DreamEnding-NX_MCP). The skill keeps its own and is
-not redistributed here.
+MIT, Copyright (c) 2026 27painter — see [LICENSE](LICENSE).
+
+Two upstreams, one vendored and one fetched at install; what each is, which commit, and exactly what
+changed is in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

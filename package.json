@@ -17,6 +17,7 @@
     "install.ps1",
     "README.md",
     "README.zh.md",
+    "THIRD-PARTY-NOTICES.md",
     "LICENSE"
   ],
   "keywords": [

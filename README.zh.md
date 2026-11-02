@@ -233,6 +233,7 @@ CI 不需要 NX：移植后的源码按 3.6 / 3.10 / 3.12 三套语法解析；�
 
 ## 许可证
 
-MIT，Copyright (c) 2026 27painter —— 见 [LICENSE](LICENSE)。`nxsrc/` 保留上游许可证
-[`nxsrc/LICENSE-DreamEnding-NX_MCP`](nxsrc/LICENSE-DreamEnding-NX_MCP)。技能保留自己的许可证，本仓库
-不重新分发它。
+MIT，Copyright (c) 2026 27painter —— 见 [LICENSE](LICENSE)。
+
+两个上游：一个 vendor 进仓库、一个安装时拉取。各自是什么、哪个 commit、具体改了什么，都在
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
