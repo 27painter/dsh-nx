@@ -1,4 +1,7 @@
 # -*- coding: utf-8 -*-
+# 用法：dsh-nx run-journal examples/a_model.py --expect MODEL_DONE
+# 需要：NX_HOME 指向安装根、一个可用许可；workdir 要可写（默认用 journal 所在目录）。
+# 产出：sw_model.prt，交给 b_drawing.py 出工程图。
 # 示例：建模一半。产出 sw_model.prt，b_drawing.py 接着给它出工程图。
 # 每步记体数断言，失败不静默。用 dsh-nx run-journal examples\a_model.py 跑。
 """NX2406 journal A: 摇臂/摆臂 零件建模（参照 三维CAD习题集 p7 右图）

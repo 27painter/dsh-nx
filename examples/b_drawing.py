@@ -1,4 +1,7 @@
 # -*- coding: utf-8 -*-
+# 用法：dsh-nx run-journal examples/b_drawing.py --expect DRAWING_PRODUCTS_OK --allow-traceback
+# 需要：先跑 a_model.py 得到 sw_model.prt；NX_HOME + 许可；workdir 可写。
+# 产出：sw_test.prt / sw_test.pdf / sw_test.stl；末尾打 DRAWING_PRODUCTS_OK。
 # 示例：出图一半。先跑 a_model.py 得到 sw_model.prt，再跑这个。
 """NX2406 journal B: 给 sw_model.prt 出 GB A3 工程图（三视图 + 标注 + 图框 + 标题栏 + PDF）。
 
@@ -439,6 +442,20 @@ def main():
         ufs.Part.Save()
         say("SAVED bytes=%d ndims=%d" % (os.path.getsize(PART), len(list(part.Dimensions))))
     step(save)
+
+    def products():
+        bad = []
+        for path, minimum in ((PART, 50 * 1024), (PDF, 2 * 1024)):
+            if not os.path.exists(path) or os.path.getsize(path) < minimum:
+                bad.append(os.path.basename(path))
+        dims = len(list(part.Dimensions))
+        if dims != 12:
+            bad.append("dims=%d" % dims)
+        if bad:
+            say("DRAWING_PRODUCTS_FAIL " + ", ".join(bad))
+        else:
+            say("DRAWING_PRODUCTS_OK")
+    step(products)
 
     say("DRAWING_DONE")
 

@@ -102,12 +102,20 @@ dsh-nx run-journal .\part.py --expect DRAWING_OK   # require a token in the outp
 dsh-nx run-journal .\part.py --allow-traceback     # the journal catches and logs exceptions
 dsh-nx run-journal .\part.py --log run1.log        # a different log file
 dsh-nx run-journal .\part.py --json                # machine-readable verdict
+dsh-nx run-journal .\part.py --no-kill             # on timeout, leave NX running (keep the scene)
+dsh-nx run-journal .\part.py --kill-grace 5        # seconds the tree gets to die (default 2)
 dsh-nx run-journal .\part.py --print-command       # show the command and env, run nothing
 ```
 
 It resolves the NX root (`NX_HOME`, then the recorded layout, then the probe), calls
-`UGII\ugiicmd.bat` first so the licence environment is set up, writes the output to
-`<workdir>\<journal>.log`, and kills the process tree on timeout.
+`UGII\ugiicmd.bat` first so the licence environment is set up, and writes the output to
+`<workdir>\<journal>.log`.
+
+On timeout it runs `taskkill /T /F` on the child's process tree — NX spawns helpers, and killing
+only the shell leaves `ugraf.exe` behind holding a licence seat — waits `--kill-grace` seconds,
+then re-checks the pid. The verdict says how many processes died and the JSON carries `killed` /
+`kill_ok`, so "timed out and cleaned up" is distinguishable from "timed out and left something
+running".
 
 **The output goes to a file descriptor, not a pipe.** A pipe needs a kernel handle some sandboxes
 refuse (`spawn EPERM`), and it would have to be teed into a log anyway. One descriptor is the whole
@@ -122,38 +130,48 @@ journal that swallows its own exception still exits `0`. So the verdict comes fr
 | signal | verdict |
 |---|---|
 | `General Fault Exception`, `failed to initialize UFUN`, `FATAL ERROR`, `_FAIL`, `BRIDGE_FAIL` | fail |
-| `Traceback`, `NXException` | fail by default, **warning** with `--allow-traceback` |
+| traceback **and** a non-clean exit | `uncaught exception (exit N)` — `--allow-traceback` does not forgive this |
+| traceback **and** a clean exit | fail by default, **warning** with `--allow-traceback` |
 | `--expect TOKEN` not found | fail |
 | exit code outside `0` / `0xC0000409` | fail, unless something above already did |
 
-`--allow-traceback` exists because the house style for a journal is `try/except` per step plus a
-traceback in the log — a healthy run of a robust journal contains one. Without it, a caught
-exception reads as failure; with it, a real crash still fails on `General Fault Exception`.
+The exit code is what separates a crash from a robust journal: a per-step `try/except` that logs and
+carries on still ends in a clean exit, while a journal that stopped on the exception does not.
+`--allow-traceback` only forgives the second kind, so a real crash still fails.
 
 `UGII_USER_PROFILE_DIR` and `UGII_TMP_DIR` are pointed at `<workdir>\.nx-profile` and
 `<workdir>\.nx-tmp`. NX otherwise writes into `%LOCALAPPDATA%\Siemens` and `%TEMP%`, which is
 where an unattended run turns into `General Fault Exception` when those are not writable.
 
-Running it from a sandboxed agent needs three paths outside the workspace:
+Running it from a sandboxed agent needs these paths outside the workspace:
 
 | path | access | why |
 |---|---|---|
 | `C:\ProgramData\Siemens` | read | licence data (`siemens_SSQ.dat`) |
-| `<NX_HOME>` | read | the install and `ugiicmd.bat` |
+| `%LOCALAPPDATA%\Siemens\NX<release>` | read/write | user profile and preferences |
+| `<NX_HOME>` | read | the install, `ugiicmd.bat`, `run_journal.exe` |
+| `%TEMP%` | read/write | NX's own scratch files |
 | `<workdir>` | read/write | parts, log, `.nx-profile`, `.nx-tmp` |
+
+A read-only default workdir — the journal's own folder, when the bundle is loaded out of a profile
+junction — falls back to `%TEMP%\dsh-nx-run-<pid>` with a line saying so, instead of failing on
+`EPERM`.
 
 ### Examples
 
 | journal | what it does |
 |---|---|
 | `examples/smoke.py` | smallest thing that proves a machine can run one — prints the interpreter, imports `NXOpen`, prints `SMOKE_OK` |
-| `examples/a_model.py` | a full part: boss + bore + keyway + pocket + holes, with body-count assertions per step; writes `sw_model.prt` |
-| `examples/b_drawing.py` | GB A3 drawing of that part: three views at 2:1, 12 dimensions, frame, title block, notes, PDF; needs the skill installed (it imports `gb_drawing` and `nxlib`) |
+| `examples/a_model.py` | a full part: boss + bore + keyway + pocket + holes, with body-count assertions per step; writes `sw_model.prt`, prints `MODEL_DONE` |
+| `examples/b_drawing.py` | GB A3 drawing of that part: three views at 2:1, 12 dimensions, frame, title block, notes, PDF; ends with a product check (`.prt` > 50 KB, PDF > 2 KB, exactly 12 dimensions) that prints `DRAWING_PRODUCTS_OK` |
+
+[`examples/README.md`](examples/README.md) covers what each one needs — a licence seat, a writable
+workdir, and for the drawing one, the part from the previous step.
 
 ```powershell
 dsh-nx run-journal examples\smoke.py --expect SMOKE_OK
-dsh-nx run-journal examples\a_model.py --expect MODEL_DONE
-dsh-nx run-journal examples\b_drawing.py --expect DRAWING_DONE --allow-traceback
+dsh-nx run-journal examples\a_model.py --expect MODEL_DONE -w D:\nx-work
+dsh-nx run-journal examples\b_drawing.py --expect DRAWING_PRODUCTS_OK -w D:\nx-work --allow-traceback
 ```
 
 Both of the larger examples were run end to end on NX 2406 — 17.9 s for the drawing, 204 KB `.prt`,

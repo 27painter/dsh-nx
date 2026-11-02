@@ -10,7 +10,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { PKG, PKG_ROOT, exists, resolveLayout, configPath } from "../lib/paths.mjs";
-import { explainMissingNx, probeNx } from "../lib/nx-root.mjs";
+import { explainMissingNx, probeNxResult, resolveNxRoot } from "../lib/nx-root.mjs";
 import { parseRunJournalArgs, runJournal } from "../lib/run-journal.mjs";
 
 const LOG = "[dsh-nx]";
@@ -127,7 +127,13 @@ function cmdInstall() {
 // ----------------------------------------------------------------- doctor
 function cmdDoctor() {
   const layout = resolveLayout();
-  const nx = probeNx(layout);
+  // The install root comes from the filesystem, not from the probe: the probe
+  // needs an interpreter, and under a sandbox starting one can be refused. A
+  // refused probe is not a missing NX, and saying so sends people hunting for
+  // the wrong thing.
+  const probed = probeNxResult(layout);
+  const nx = probed.nx;
+  const resolved = resolveNxRoot(layout, nx);
   say(`package   ${PKG_ROOT} (v${PKG.version})`);
   // PKG_ROOT is this file's parent. When the bundle is loaded through a profile
   // junction that is a different folder from the one on disk, and "which copy
@@ -140,26 +146,34 @@ function cmdDoctor() {
   if (stale.length) {
     say(`loaded    older copy on disk: ${stale.join("; ")} — that one still runs old code`);
   }
-  if (!nx || !nx.installed) {
+  if (!resolved) {
     say(`nx        not found: ${explainMissingNx(layout, nx)}`);
   } else {
-    say(`nx        ${nx.root}  version ${nx.version || "unknown"}  NXOpen Python ${nx.nxopen_python}  [${nx.support}]`);
-    say(`nx        ${nx.support_note}`);
-    // Several releases can sit side by side; the probe already picked one, but
-    // silently driving a different NX than the one on screen is how you spend an
-    // afternoon on the wrong file.
-    const others = (nx.installations || []).filter((item) => !item.chosen);
+    const detail = nx
+      ? `version ${nx.version || "unknown"}  NXOpen Python ${nx.nxopen_python}  [${nx.support}]`
+      : "interpreter unknown";
+    say(`nx        ${resolved.root}  (from ${resolved.source})  ${detail}`);
+    if (!nx) {
+      say(`nx        ${probed.error} — the install is there; only the version report is missing`);
+    } else {
+      say(`nx        ${nx.support_note}`);
+    }
+    if (!nx) {
+      // nothing more to say about support levels without a probe
+    } else if (!nx.supported) {
+      say(`nx        this build cannot be driven: ${nx.support_note}`);
+    } else if (nx.support === "expected") {
+      say("nx        not a warning — run one real part through the skill, then add the release to VERIFIED_PYTHON");
+    }
+    const others = ((nx && nx.installations) || []).filter((item) => !item.chosen);
+    // Several releases can sit side by side; silently driving a different one
+    // than the user has on screen is how an afternoon goes missing.
     if (others.length) {
       const list = others
         .map((item) => `${item.root} (Python ${item.nxopen_python}, ${item.support})`)
         .join("; ");
       say(`nx        also installed: ${list}`);
       say("nx        set NX_HOME to drive a different one; the environment variable always wins");
-    }
-    if (!nx.supported) {
-      say(`nx        this build cannot be driven: ${nx.support_note}`);
-    } else if (nx.support === "expected") {
-      say("nx        not a warning — run one real part through the skill, then add the release to VERIFIED_PYTHON");
     }
   }
   const venv = venvPython(layout);
@@ -353,7 +367,8 @@ switch (cmd) {
       "usage: dsh-nx <install|doctor|where|serve|run-journal|bridge-start|bridge-stop|version>\n" +
         "       dsh-nx run-journal <journal.py> [--workdir DIR] [--timeout SEC]\n" +
         "                         [--expect TOKEN]... [--fail-on REGEX]... [--log FILE]\n" +
-        "                         [--allow-traceback] [--json] [--quiet] [--print-command]",
+        "                         [--allow-traceback] [--no-kill] [--kill-grace SEC]\n" +
+        "                         [--json] [--quiet] [--print-command]",
     );
     process.exit(2);
 }
