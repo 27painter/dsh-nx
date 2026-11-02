@@ -32,10 +32,10 @@ function realpathOr(target) {
   }
 }
 
-// Every place a `dsh-nx` can be loaded from, other than the one running now.
-// Two copies with the same name is how a fix "does not apply" — one of them is
-// still the old code.
-function otherCopies() {
+// Every place a `dsh-nx` can be loaded from, other than the one running now —
+// but only the ones whose version differs. A second copy at the same version is
+// the source tree you are editing, not drift; naming it every run is noise.
+function staleCopies() {
   const here = realpathOr(PKG_ROOT).toLowerCase();
   const profiles = path.join(os.homedir(), ".dsh", "profiles");
   const candidates = [path.join(profiles, "node_modules", "dsh-nx")];
@@ -51,7 +51,14 @@ function otherCopies() {
     if (!exists(candidate)) continue;
     const real = realpathOr(candidate);
     if (real.toLowerCase() === here) continue;
-    found.push(real);
+    let version = null;
+    try {
+      version = JSON.parse(fs.readFileSync(path.join(real, "package.json"), "utf8")).version;
+    } catch {
+      version = null;
+    }
+    if (version === PKG.version) continue;
+    found.push(`${real} (v${version || "?"})`);
   }
   return found;
 }
@@ -129,9 +136,9 @@ function cmdDoctor() {
   if (loaded.toLowerCase() !== PKG_ROOT.toLowerCase()) {
     say(`loaded    ${loaded}  (via a link)`);
   }
-  const copies = otherCopies(layout);
-  if (copies.length) {
-    say(`loaded    also found: ${copies.join("; ")} — a second copy drifts out of date; point both at one folder`);
+  const stale = staleCopies();
+  if (stale.length) {
+    say(`loaded    older copy on disk: ${stale.join("; ")} — that one still runs old code`);
   }
   if (!nx || !nx.installed) {
     say(`nx        not found: ${explainMissingNx(layout, nx)}`);
