@@ -1,16 +1,24 @@
 # dsh-nx
 
-让 DeepSeek Harness 和 Codex 驱动 Siemens NX。
-
-它是一个 **dsh 插件**——一条 bundle 记录，`apply()` 里注册一个 MCP 服务器——外加一个**技能**。
-MCP 那行默认关着，要 `NX_ENABLE_MCP=1` 才开，因为批处理 NX 跑多久就占多久许可；技能在真正用之前
-完全不碰 NX。
-
-NX 没有可供脚本连接的自动化服务器——NXOpen 跑在进程内——所以任何自动化都得自己起一个批处理 NX，
-把 journal 放进去跑。这个仓库就做三件事：把一个已有的 MIT 桥移植到 NX 12；执行单个 journal 并告诉你
-它到底成没成；以及可选地常驻一个批处理 NX，供一组类型化工具调用。
-
 [English](README.md) | 中文
+
+让 DeepSeek Harness 的 agent 驱动 Siemens NX——**包括 NX 12**，而现有的那个 NX 桥根本跑不了 NX 12。
+
+NXOpen 跑在 NX 进程内，所以自动化的唯一办法是起一个批处理 NX、把 journal 放进去跑。这个仓库就是
+这件事在 NX 12 上的实现：把桥移植到 NX 12 真正内嵌的那个解释器；一个能告诉你「这次到底成没成」的
+执行器；以及一个能把三个版本分清楚的探测。这个领域里没有别人覆盖 NX 12，因为别人做不到。
+
+## 缺的是什么，这里补了什么
+
+| 能力 | 之前 | 现在 |
+|---|---|---|
+| 自动化 **NX 12** | 上游桥要求 Python 3.10+，而 NX 12 内嵌 3.6.1，所以根本跑不起来 | 五个模块、1,785 行移植过去；NX 12 上跑的是同一套 16 个工具 |
+| 知道一次运行**成没成** | `run_journal.exe` 对一个自己吞掉异常的 journal 照样返回 `0` | `run-journal`：判定来自日志，超时杀进程树，JSON 里带原因 |
+| 知道机器上是**哪个 NX** | 查注册表，或者靠猜 | `probe.py`：列出每一份安装、各自的解释器、以及 `verified` / `expected` 标签 |
+| 把它**装上** | 克隆、建 venv、做 junction、设 `NX_HOME`、配许可目录，全手工 | `install.ps1` + `doctor`，后者会指出唯一出错的那一处 |
+| 让 agent 会写 NXOpen | 一份把版本写死在文字里的技能 | 同一份技能，解释器指引和 API 检查都跟着版本走 |
+
+前两行是这个仓库存在的理由，后三行是它能在真机器上跑起来、而不只是演示的原因。
 
 ## 安装
 
@@ -58,7 +66,7 @@ New-Item -ItemType Junction -Path $dst -Target $src
 
 ## 状态
 
-先看这张表，下面所有内容都以它为前提。
+下面所有内容都以这张表为前提。
 
 | | 状态 |
 |---|---|
@@ -73,21 +81,21 @@ New-Item -ItemType Junction -Path $dst -Target $src
 
 ## 为什么需要它
 
-两件事让 NX 自动化别扭，它们也决定了这里的每个设计：
+两条硬约束决定了这里每个设计：
 
 **NXOpen 跑在 NX 里面。** 没有 COM 服务器，没有进程外句柄，agent 没有任何办法挂到你打开的那个 NX
 上。可选的路只有两条：「自己起一个批处理 NX」或「把 journal 拷进去手工跑」。这里每条路都走第一条，
 这也是常驻桥活着时 NX 被占用的原因。
 
-**NX 各版本不共用一个 Python。** 12 内嵌 CPython 3.6.1，2406 是 3.10，2506 是 3.12。为新版本写的
-代码在旧版本上跑不了，而 NX 12 仍是存量最多的一版。下面的移植是按 3.6.1 写的、向后打垫片，所以新
-版本跑的是同一套代码，垫片自动失效。
+**NX 各版本不共用一个 Python。** 12 内嵌 3.6.1，2406 是 3.10，2506 是 3.12。上游瞄的是最新的那个，
+把最老的那个——也就是存量最多的 NX 12——留在了没有任何自动化路径的状态。这里的移植按 3.6.1 写、
+向后打垫片，所以新版本跑的是同一套代码，垫片自动失效。
 
 ## 箱子里有什么
 
 | 路径 | 行数 | 是什么 |
 |---|---|---|
-| `nxsrc/` | 3,030（30 个文件） | 跑在 NX **内部**的桥——是移植，见[来源](#来源) |
+| `nxsrc/` | 3,030（30 个文件） | 跑在 NX **内部**的桥——移植版，见[建立在什么之上](#建立在什么之上) |
 | `nxsrc/nx_mcp/nx_bridge.py` + `bridge.py` | 766 + 872 | 移植后的核心：会话、回环 JSON-RPC、16 个工具实现 |
 | `lib/run-journal.mjs` | 408 | 执行器：解析 NX、运行、判定、杀进程 |
 | `lib/probe.py` | 243 | 找出机器上每一份 NX，并标出各自能干什么 |
@@ -98,42 +106,6 @@ New-Item -ItemType Junction -Path $dst -Target $src
 | `examples/` | 3 个 journal | 冒烟、零件、以及这个零件的 GB A3 工程图 |
 
 `bin/`、`lib/`、`install.ps1` 里的自有代码合计 1,402 行。
-
-## 来源
-
-三方。两方是别人的 MIT 代码，第三方是本仓库。
-
-**桥 —— [`DreamEnding/NX_MCP`](https://github.com/DreamEnding/NX_MCP) 的 `4a7c8811`。**
-上游要求 Python 3.10+，并且提供两个桥：C# GUI 桥和 Python 批处理桥。这里只留 Python 那个——C# 桥
-要按 NX 12 的程序集重新编译，而加载未签名 DLL 需要 NX Open .NET 作者许可。五个模块（1,785 行）
-被移植到 3.6.1：
-
-- 去掉 `from __future__ import annotations`，然后用**按 AST 偏移的改写工具把 256 条注解逐条加引号**，
-  让它们永不被求值（`str | None`、`dict[str, int]` 是 3.10/3.9 语法）。正则会把注释和排版一起吃掉，
-  这个不会。
-- 给 3.6 补了一个 `dataclasses` 替身，且**在 3.7+ 上是直通**——Pydantic 会检查 `__dataclass_fields__`，
-  只模仿 dataclass 的东西会被它拒掉。
-- `str.isascii()`、`Path.unlink(missing_ok=True)` 和 walrus 运算符逐处替换。这三处都是**跑工具跑出来
-  的**，读代码一处也看不出来。
-- 拉伸那一段重写：上游的 `CreateRuleCurveFeature([sketch], Null)` 在 12 和 2406 上都报 NX 错误
-  650004，现在按顺序试四种建截面的组合，每次记录是哪一步失败。失败会指出具体那一步，而不是丢回一句
-  "Bridge execution failed"。
-
-每一处改动的证据都记在 [`nxsrc/PORT-NOTES.md`](nxsrc/PORT-NOTES.md)。
-
-**技能 —— [`EVOL233awa/nxopen-journal`](https://github.com/EVOL233awa/nxopen-journal) 的
-`4b77d88`（v1.3.0）。** 作者是另一个人，不是这个账号。安装时以 zip 形式取回（不需要 git），并
-junction 到 `~/.dsh/skills` 和 `~/.codex/skills`；**不 vendor**，所以你拿到的是他们当前的代码，
-著作权也归他们。其中两个文件在本地打了补丁，因为它原本只面向 NX 12：
-
-| 文件 | 原来错在哪 | 现在怎么做 |
-|---|---|---|
-| `SKILL.md` | 「journal 解释器是 3.6.1」，当成事实写死 | 按版本列出 3.6.1 / 3.10 / 3.12，并说明怎么查 |
-| `scripts/check_journal.py` | 无条件把 `math.dist`、`functools.cache`、`itertools.pairwise` 判成错误 | 接受目标版本（`--python-version`、`--print-python`），默认仍按三版本通吃的 3.6 子集 |
-
-这两处补丁只在本机，没有合进上游；它们是与上游的全部差异。
-
-**其余部分**——执行器、探测、安装器、MCP 行、示例——都是本仓库写的，MIT，不主张任何上游归属。
 
 ## 三条入口
 
@@ -202,6 +174,38 @@ dsh-nx run-journal .\part.py --print-command       # 只打印命令和环境，
 | 日志只有 100 字节，但 journal 干了不少活 | NX 在非控制台环境下缓冲 stdout | 用 `--expect` 判定，或看 journal 自己写的文件日志 |
 | 超时之后 `ugraf.exe` 还在 | 早先的版本只杀 shell | 当前版本杀整棵树；`--no-kill` 是显式选择，不是默认 |
 
+## 建立在什么之上
+
+两个上游。哪些是「用」，哪些是「重写」，这里划清楚。
+
+**桥 —— [`DreamEnding/NX_MCP`](https://github.com/DreamEnding/NX_MCP) 的 `4a7c8811`，MIT。**
+上游要求 Python 3.10+，提供 C# GUI 桥和 Python 批处理桥两个。这里只留 Python 那个，因为 C# 桥要按
+NX 12 的程序集重编，而加载未签名 DLL 需要 NX Open .NET 作者许可。五个模块——`bridge_journal.py`、
+`nx_bridge.py`、`bridge.py`、`runtime.py`、`workspace.py`，共 1,785 行——被移植到 3.6.1：
+
+- 去掉 `from __future__ import annotations`，再用**按 AST 偏移的改写工具把 256 条注解逐条加引号**，
+  让它们永不被求值（`str | None`、`dict[str, int]` 是 3.10/3.9 语法）。正则会把注释和排版一起吃掉，
+  这个不会。
+- 给 3.6 补了一个 `dataclasses` 替身，且**在 3.7+ 上是直通**——Pydantic 会检查 `__dataclass_fields__`，
+  只模仿 dataclass 的东西会被它拒掉。
+- `str.isascii()`、`Path.unlink(missing_ok=True)` 和 walrus 运算符逐处替换。这三处都是**跑工具跑出来
+  的**，读代码一处也看不出来。
+- 拉伸那一段重写：上游的 `CreateRuleCurveFeature([sketch], Null)` 在 12 和 2406 上都报 NX 错误
+  650004，现在按顺序试四种建截面的组合并记录是哪一步失败。失败会指出具体那一步，而不是丢回一句
+  "Bridge execution failed"。
+
+每一处改动的证据都记在 [`nxsrc/PORT-NOTES.md`](nxsrc/PORT-NOTES.md)。
+
+**技能 —— [`EVOL233awa/nxopen-journal`](https://github.com/EVOL233awa/nxopen-journal) 的
+`4b77d88`（v1.3.0），MIT。** 作者是另一个人，不是这个账号。安装时以 zip 取回并 junction 进来；
+不 vendor，所以你拿到的是他们当前的代码，著作权也归他们。其中两个文件在本地打了补丁，因为它原本
+只面向 NX 12：`SKILL.md` 现在按版本列出解释器，而不是把 3.6.1 当成事实；`check_journal.py` 接受
+目标版本（`--python-version`、`--print-python`），而不是无条件把 3.8+ 的 API 判成错误。这两处补丁
+只在本机，没有合进上游。
+
+**其余部分**——执行器、探测、安装器、MCP 行、示例——都是本仓库写的。同样的划分（带 commit 与许可证
+路径）也写在 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+
 ## 验证方式
 
 | | NX 12.0.0.27 | NX 2406.1700 |
@@ -233,7 +237,5 @@ CI 不需要 NX：移植后的源码按 3.6 / 3.10 / 3.12 三套语法解析；�
 
 ## 许可证
 
-MIT，Copyright (c) 2026 27painter —— 见 [LICENSE](LICENSE)。
-
-两个上游：一个 vendor 进仓库、一个安装时拉取。各自是什么、哪个 commit、具体改了什么，都在
-[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+MIT，Copyright (c) 2026 27painter —— 见 [LICENSE](LICENSE)。两个上游，一个 vendor、一个安装时拉取；
+各自是什么、改了什么，记在 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。

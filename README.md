@@ -1,17 +1,27 @@
 # dsh-nx
 
-Siemens NX for DeepSeek Harness and Codex.
-
-It ships as a **dsh plugin** — one bundle row whose `apply()` registers an MCP server — plus a
-**skill**. The MCP row stays off unless `NX_ENABLE_MCP=1`, because a batch NX holds a licence seat for
-as long as it runs; the skill needs no NX at all until it is used.
-
-NX has no automation server a script can attach to — NXOpen is in-process — so anything automated has
-to start a batch NX and run a journal inside it. This repository does three things about that: it
-ports an existing MIT bridge to NX 12, it executes one journal and tells you whether it worked, and it
-optionally keeps a batch NX alive for a set of typed tools.
-
 English | [中文](README.zh.md)
+
+Drive Siemens NX from a DeepSeek Harness agent — **including NX 12**, which the existing NX bridge
+cannot run on at all.
+
+NXOpen runs inside NX, so automation means starting a batch NX and running a journal inside it. This
+repository is the NX 12 implementation of that: the bridge ported to the interpreter NX 12 actually
+ships, an executor that reports whether the journal did what it was asked, and a probe that keeps
+three releases apart. Nothing else in this space covers NX 12, because nothing else can.
+
+## What was missing, and what this adds
+
+| capability | before | here |
+|---|---|---|
+| automate **NX 12** | the upstream bridge requires Python 3.10+; NX 12 embeds 3.6.1, so it does not run | 1,785 lines ported across five modules; NX 12 runs the same 16 tools |
+| know whether a run **worked** | `run_journal.exe` returns `0` for a journal that swallowed its own exception | `run-journal`: verdict from the log, process-tree kill on timeout, JSON with the reasons |
+| know **which NX** is on the machine | read the registry, or guess | `probe.py`: every install, its interpreter, and a `verified` / `expected` label |
+| **install** it | clone, venv, junctions, `NX_HOME`, licence dirs, by hand | `install.ps1` + `doctor`, which names the one thing that is wrong |
+| NXOpen knowledge for an agent | a skill pinned to NX 12, with the release baked into the text | the same skill, with the interpreter guidance and API checks following the release |
+
+The first two rows are the reason this exists. The other three are what makes it usable on a real
+machine rather than in a demo.
 
 ## Installing
 
@@ -60,7 +70,7 @@ Then `"dsh-nx": "link:D:/path/to/dsh-nx"` in `dependencies` and `"dsh-nx"` in `d
 
 ## Status
 
-Read this before the rest; everything below is scoped by it.
+Everything below is scoped by this table.
 
 | | state |
 |---|---|
@@ -76,22 +86,22 @@ it, and this README does not claim otherwise.
 
 ## Why it exists
 
-Two things make NX automation awkward, and both shape the design:
+Two constraints shape every decision here:
 
 **NXOpen runs inside NX.** No COM server, no out-of-process handle, no way for an agent to attach to
 the NX you have open. The options are "start our own batch NX" or "run the journal by hand"; every
 route here takes the first one, which is also why NX is busy while the resident bridge is up.
 
 **NX releases do not share a Python.** 12 embeds CPython 3.6.1, 2406 embeds 3.10, 2506 embeds 3.12.
-Code written for the newest release does not run on the oldest, and NX 12 is the one most seats still
-have. The port below is written against 3.6.1 and shims forward, so a newer release executes the same
-code with the shims inert.
+Upstream targeted the newest of those and left the oldest — the one most seats still have — with no
+automation path. The port is written against 3.6.1 and shims forward, so a newer release executes the
+same code with the shims inert.
 
 ## What is in the box
 
 | path | lines | what it is |
 |---|---|---|
-| `nxsrc/` | 3,030 (30 files) | the bridge that runs *inside* NX — a port, see [Provenance](#provenance) |
+| `nxsrc/` | 3,030 (30 files) | the bridge that runs *inside* NX — ported, see [What it builds on](#what-it-builds-on) |
 | `nxsrc/nx_mcp/nx_bridge.py` + `bridge.py` | 766 + 872 | the ported core: session, JSON-RPC over loopback, 16 tool implementations |
 | `lib/run-journal.mjs` | 408 | the executor: resolve NX, run, judge, kill |
 | `lib/probe.py` | 243 | finds every NX install and labels what each one can do |
@@ -102,45 +112,6 @@ code with the shims inert.
 | `examples/` | 3 journals | a smoke test, a part, and a GB A3 drawing of that part |
 
 Original code in `bin/`, `lib/` and `install.ps1`: 1,402 lines.
-
-## Provenance
-
-Three parties. Two are other people's MIT code; the third is this repository.
-
-**The bridge — [`DreamEnding/NX_MCP`](https://github.com/DreamEnding/NX_MCP) at `4a7c8811`.**
-Upstream requires Python 3.10+ and ships a C# GUI bridge and a Python batch bridge. This keeps only
-the Python one — the C# bridge would need recompiling against NX 12's assemblies, and loading an
-unsigned DLL needs an NX Open .NET author licence. Five modules (1,785 lines) were ported to 3.6.1:
-
-- `from __future__ import annotations` removed, then **256 annotations re-quoted** with an AST-offset
-  rewriter so they are never evaluated (`str | None` and `dict[str, int]` are 3.10/3.9 syntax). A
-  regex would have eaten comments and formatting; this does not.
-- A `dataclasses` stand-in for 3.6 that is **a pass-through above 3.7**, because Pydantic inspects
-  `__dataclass_fields__` and rejects anything that merely imitates a dataclass.
-- `str.isascii()`, `Path.unlink(missing_ok=True)` and the walrus operator replaced at their call
-  sites. All three were found by running the tools — none is visible by reading the code.
-- The extrude section rewritten: upstream's `CreateRuleCurveFeature([sketch], Null)` fails with NX
-  error 650004 on 12 and 2406 alike, so the section is now built by trying four combinations in
-  order, each attempt recording which call failed. A failure names the step instead of returning
-  "Bridge execution failed".
-
-[`nxsrc/PORT-NOTES.md`](nxsrc/PORT-NOTES.md) records each change with the evidence that prompted it.
-
-**The skill — [`EVOL233awa/nxopen-journal`](https://github.com/EVOL233awa/nxopen-journal) at
-`4b77d88` (v1.3.0).** A different author, not this account. Fetched at install time as a zip (so git
-is not needed) and junctioned into `~/.dsh/skills` and `~/.codex/skills`; **not vendored**, so you get
-their current code and they keep the copyright. Two of its files are patched locally, because it was
-written for NX 12 only:
-
-| file | what was wrong | what it does now |
-|---|---|---|
-| `SKILL.md` | "the journal interpreter is 3.6.1", stated as a fact | lists 3.6.1 / 3.10 / 3.12 per release, and says how to check |
-| `scripts/check_journal.py` | flagged `math.dist`, `functools.cache`, `itertools.pairwise` as errors unconditionally | takes a target version (`--python-version`, `--print-python`), defaulting to the 3.6 subset that runs on all three |
-
-Those patches are local and unmerged; they are the only divergence from upstream.
-
-**Everything else** — the executor, the probe, the installer, the MCP row, the examples — is written
-here, MIT, no upstream claim.
 
 ## Three ways to drive NX
 
@@ -213,6 +184,41 @@ Symptoms seen on this machine, and what they actually mean:
 | the log is 100 bytes though the journal did plenty | NX buffers stdout when it is not a console | judge on `--expect`, or on the journal's own file log |
 | a timeout leaves `ugraf.exe` behind | earlier builds killed only the shell | current versions kill the tree; `--no-kill` is opt-in, not the default |
 
+## What it builds on
+
+Two upstreams, and the line between "used" and "rewritten" is worth being exact about.
+
+**The bridge — [`DreamEnding/NX_MCP`](https://github.com/DreamEnding/NX_MCP) at `4a7c8811`, MIT.**
+Upstream requires Python 3.10+ and ships a C# GUI bridge and a Python batch bridge. This keeps only
+the Python one, because the C# bridge would need recompiling against NX 12's assemblies and loading an
+unsigned DLL needs an NX Open .NET author licence. Five modules — `bridge_journal.py`,
+`nx_bridge.py`, `bridge.py`, `runtime.py`, `workspace.py`, 1,785 lines — were ported to 3.6.1:
+
+- `from __future__ import annotations` removed, then **256 annotations re-quoted** with an AST-offset
+  rewriter so they are never evaluated (`str | None` and `dict[str, int]` are 3.10/3.9 syntax). A
+  regex would have eaten comments and formatting; this does not.
+- A `dataclasses` stand-in for 3.6 that is **a pass-through above 3.7**, because Pydantic inspects
+  `__dataclass_fields__` and rejects anything that merely imitates a dataclass.
+- `str.isascii()`, `Path.unlink(missing_ok=True)` and the walrus operator replaced at their call
+  sites. All three were found by running the tools — none is visible by reading the code.
+- The extrude section rebuilt: upstream's `CreateRuleCurveFeature([sketch], Null)` fails with NX error
+  650004 on 12 and 2406 alike, so the section now tries four combinations in order and records which
+  call failed. A failure names the step instead of returning "Bridge execution failed".
+
+[`nxsrc/PORT-NOTES.md`](nxsrc/PORT-NOTES.md) records each change with the evidence that prompted it.
+
+**The skill — [`EVOL233awa/nxopen-journal`](https://github.com/EVOL233awa/nxopen-journal) at
+`4b77d88` (v1.3.0), MIT.** A different author, not this account. Fetched at install time as a zip and
+junctioned in; not vendored, so you get their current code and they keep the copyright. Two of its
+files are patched locally, because it was written for NX 12 only: `SKILL.md` now lists the interpreter
+per release instead of stating 3.6.1, and `check_journal.py` takes a target version
+(`--python-version`, `--print-python`) instead of flagging 3.8+ APIs unconditionally. Those patches
+are local and unmerged.
+
+**Everything else** — the executor, the probe, the installer, the MCP row, the examples — is written
+here. [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) has the same split with commit hashes and
+licence paths.
+
 ## How this was tested
 
 | | NX 12.0.0.27 | NX 2406.1700 |
@@ -245,7 +251,5 @@ each interpreter.
 
 ## Licence
 
-MIT, Copyright (c) 2026 27painter — see [LICENSE](LICENSE).
-
-Two upstreams, one vendored and one fetched at install; what each is, which commit, and exactly what
-changed is in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+MIT, Copyright (c) 2026 27painter — see [LICENSE](LICENSE). Two upstreams, one vendored and one fetched
+at install; [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) records what each is and what changed.
