@@ -1,6 +1,6 @@
 {
   "name": "dsh-nx",
-  "version": "0.2.0",
+  "version": "1.2.1",
   "description": "Siemens NX (12, 2406, 2506) for dsh and Codex: installs a pinned NXOpen journal skill and wraps run_journal.exe so an agent can tell success from failure.",
   "license": "MIT",
   "type": "module",
@@ -16,6 +16,7 @@
     "cordis.patch.yml",
     "install.ps1",
     "README.md",
+    "README.zh.md",
     "LICENSE"
   ],
   "keywords": [

@@ -1,131 +1,184 @@
 # dsh-nx
 
-Siemens NX for [dsh](https://github.com/deepseek-ai/dsh) and Codex — NX 12, 2406 and 2506.
+Siemens NX for DeepSeek Harness and Codex.
 
-| release | interpreter inside NX | status |
-|---|---|---|
-| NX 12 (12.0.0.27) | CPython 3.6.1 | **verified** — all 16 tools |
-| NX 2406 (2406.1700) | CPython 3.10 | **verified** — all 16 tools |
-| NX 2506 | CPython 3.12 | same code path, **not yet run** on a real 2506 |
+It ships as a **dsh plugin** — one bundle row whose `apply()` registers an MCP server — plus a
+**skill**. The MCP row stays off unless `NX_ENABLE_MCP=1`, because a batch NX holds a licence seat for
+as long as it runs; the skill needs no NX at all until it is used.
 
-"All 16 tools" covers **modelling and export only**: part, sketch, rectangle, line, finish,
-extrude, undo, the three list tools, STEP export, save, close, fit, open. There is no Drafting
-tool in that set — no view projection, no dimension, no title block, no GB frame, no PDF. A
-drawing job still ends in a journal, whichever route you take; `dsh-nx run-journal` is how you
-run that journal with a verdict.
+NX has no automation server a script can attach to — NXOpen is in-process — so anything automated has
+to start a batch NX and run a journal inside it. This repository does three things about that: it
+ports an existing MIT bridge to NX 12, it executes one journal and tells you whether it worked, and it
+optionally keeps a batch NX alive for a set of typed tools.
 
-The bridge is written against the *oldest* interpreter (NX 12's 3.6.1) and shims forward, so a newer
-release runs the same code with the shims inert — `nx_mcp/_compat.py` explains which branch each
-interpreter takes. `dsh-nx doctor` reports the interpreter it found and labels it `verified` or
-`expected`, so the table above is never the only thing you have to go on.
+English | [中文](README.zh.md)
 
-Two ways in, and the difference matters:
+## Installing
 
-| | what it is | costs |
-|---|---|---|
-| **Skill** (default) | the `nxopen-journal` skill: the agent writes NXOpen Python and runs it through `run_journal.exe` | nothing until used; NX opens per task and exits |
-| **MCP tools** (opt-in, `NX_ENABLE_MCP=1`) | 16 typed tools — `nx_create_part`, `nx_sketch_rectangle`, `nx_extrude`, `nx_export_step`, … | starts a **batch NX session** that stays up; NX is busy while it lives |
-
-The skill is on by default because it does not hold NX. The tools are off by default because booting dsh should not wait for a CAD application.
-
-## Why this exists
-
-[`DreamEnding/NX_MCP`](https://github.com/DreamEnding/NX_MCP) is the closest thing to an NX MCP server, but it targets NX 2206 (C# GUI bridge) and NX 2506 (Python batch bridge). NX 12 embeds **CPython 3.6.1**, and the code that runs inside NX needs 3.7+/3.8+ features. `nxsrc/` is that project, patched so it imports and runs on 3.6.1 — `nxsrc/PORT-NOTES.md` lists the six changes and the evidence.
-
-The C# GUI bridge is not ported: it would need recompiling against NX 12 assemblies, and loading an unsigned DLL requires an NX Open .NET author licence. NX 12 therefore uses the **batch** bridge only, which is why NX is busy while the tools are registered.
-
-[`EVOL233awa/nxopen-journal`](https://github.com/EVOL233awa/nxopen-journal) is the skill, pinned at `4b77d88` (v1.3.0) — it targets NX 12 exactly, ships 35 regression cases and a static pitfall checker.
-
-## Install
+NX is neither installed nor modified. `install.ps1` builds a venv for the sidecar, fetches the pinned
+skill, and junctions it in.
 
 ```powershell
-npm install -g dsh-nx
-dsh-nx install          # venv for the sidecar, the pinned skill, the skill junctions
-dsh-nx doctor           # read-only; exits 1 if something is missing
+git clone https://github.com/27painter/dsh-nx
+cd dsh-nx
+npm install -g .            # puts `dsh-nx` on PATH
+dsh-nx install              # [1/5] python  [2/5] venv-nx  [3/5] skill  [4/5] NX_HOME  [5/5] junctions
+dsh-nx doctor               # read-only; exit 1 when something is missing
 ```
 
-`install` creates `venv-nx` (the sidecar needs `mcp>=2.2`, which conflicts with an `mcp 1.x` venv), fetches the skill at the pinned commit, and junctions it into `~/.dsh/skills` and `~/.codex/skills`. It never touches the NX installation and never deletes a venv.
-
-Requires: Windows, NX 12 / 2406 / 2506, Python 3.11+ on PATH. `install` detects the NX root and
-sets `NX_HOME` for the current user if it is not set — the skill's own runner needs it and defaults to a
-path that exists on almost no machine.
-
-When several releases are installed side by side, `doctor` lists all of them and drives the one
-`NX_HOME` (or `UGII_BASE_DIR`) names; with neither set it picks the newest. To switch:
+`dsh-nx install` is a thin wrapper around `install.ps1`; run the script directly to see its output:
 
 ```powershell
-$env:NX_HOME = "C:\Program Files\Siemens\NX2506"
-dsh-nx doctor
+.\install.ps1
+.\install.ps1 -BaseDir "E:\cad" -Force      # different location / rebuild
 ```
 
-### Linking the bundle into a dsh profile
+The package is not on npm, so `npm install -g dsh-nx` does not resolve.
 
-`lib/index.js` imports `@deepseek-ai/dsh-mcp-client`, which dsh provides. Node resolves that import
-from the plugin's **real** path, not the profile's — so a profile entry pointing at a folder outside
-dsh's tree (e.g. `D:\dsh_plugins\dsh-nx`) fails at load with `ERR_MODULE_NOT_FOUND` unless the plugin
-can see it. Give the plugin its own link to dsh's copy:
+At this point the **skill** works. The **MCP tools** also need the plugin row below.
+
+### The plugin row
+
+What was done on the development machine: a junction into the profile, a dependency entry, and a
+bundle entry. `dsh plugin --profile desktop add link:<path>` is the pnpm equivalent.
+
+```powershell
+New-Item -ItemType Junction -Path "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\dsh-nx" -Target "D:\path\to\dsh-nx"
+```
+
+A plugin reached through a `link:` resolves bare imports from its **real** path, so
+`@deepseek-ai/dsh-mcp-client` must be reachable from there or the plugin fails at load:
 
 ```powershell
 $src = "$env:APPDATA\npm\node_modules\@deepseek-ai\dsh\node_modules\@deepseek-ai\dsh-mcp-client"
-$dst = "D:\dsh_plugins\dsh-nx\node_modules\@deepseek-ai\dsh-mcp-client"
+$dst = "D:\path\to\dsh-nx\node_modules\@deepseek-ai\dsh-mcp-client"
 New-Item -ItemType Directory -Force -Path (Split-Path $dst) | Out-Null
 New-Item -ItemType Junction -Path $dst -Target $src
 ```
 
-Same version as the dsh that will load it, so nothing is pinned behind dsh's back. Check it with
-`node -e "import('dsh-nx').then(m => console.log(Object.keys(m)))"` from the profile folder — it
-should print `apply, inject, name`.
+Then `"dsh-nx": "link:D:/path/to/dsh-nx"` in `dependencies` and `"dsh-nx"` in `dsh.profile.bundles`.
 
-`doctor` prints `loaded` when the running copy is reached through a link, and names any other copy
-it finds on disk (`also found: …`). Two copies of the same bundle is how a fix "does not apply":
-one of them is still the old code.
+## Status
 
-## Using the skill
+Read this before the rest; everything below is scoped by it.
 
-Nothing to do — the skill appears in `~/.dsh/skills` and dsh loads it when a request mentions NX. Say what you want:
+| | state |
+|---|---|
+| NX 12 (12.0.0.27, CPython 3.6.1) | the 16 tools, the skill and `run-journal` all ran on a real part |
+| NX 2406 (2406.1700, CPython 3.10) | same, plus both worked examples end to end |
+| NX 2506 (CPython 3.12) | **never run.** Parses and imports under 3.12; the probe labels it `expected`, not `verified` |
+| the 16 MCP tools | modelling and export only — **no Drafting**: no view projection, dimension, title block, GB frame or PDF |
+| driving an NX window you already have open | **not possible**, by design of NXOpen |
+| the package on npm | not published |
 
-```text
-用 NX 建一个 120×80×12 的支座，四角 M8 沉头孔，导出三视图。
+If you need a drawing out of NX, that is a journal job whichever route you take — the tools cannot do
+it, and this README does not claim otherwise.
+
+## Why it exists
+
+Two things make NX automation awkward, and both shape the design:
+
+**NXOpen runs inside NX.** No COM server, no out-of-process handle, no way for an agent to attach to
+the NX you have open. The options are "start our own batch NX" or "run the journal by hand"; every
+route here takes the first one, which is also why NX is busy while the resident bridge is up.
+
+**NX releases do not share a Python.** 12 embeds CPython 3.6.1, 2406 embeds 3.10, 2506 embeds 3.12.
+Code written for the newest release does not run on the oldest, and NX 12 is the one most seats still
+have. The port below is written against 3.6.1 and shims forward, so a newer release executes the same
+code with the shims inert.
+
+## What is in the box
+
+| path | lines | what it is |
+|---|---|---|
+| `nxsrc/` | 3,030 (30 files) | the bridge that runs *inside* NX — a port, see [Provenance](#provenance) |
+| `nxsrc/nx_mcp/nx_bridge.py` + `bridge.py` | 766 + 872 | the ported core: session, JSON-RPC over loopback, 16 tool implementations |
+| `lib/run-journal.mjs` | 408 | the executor: resolve NX, run, judge, kill |
+| `lib/probe.py` | 243 | finds every NX install and labels what each one can do |
+| `bin/dsh-nx.mjs` | 374 | `install` / `doctor` / `where` / `serve` / `run-journal` / `bridge-start` / `bridge-stop` |
+| `lib/capture.mjs` | 74 | runs a child through a file descriptor instead of a pipe |
+| `lib/nx-root.mjs` + `lib/paths.mjs` | 77 + 71 | one resolver for "which NX", and the layout defaults |
+| `install.ps1` | 155 | venv, the pinned skill, the junctions, `NX_HOME` |
+| `examples/` | 3 journals | a smoke test, a part, and a GB A3 drawing of that part |
+
+Original code in `bin/`, `lib/` and `install.ps1`: 1,402 lines.
+
+## Provenance
+
+Three parties. Two are other people's MIT code; the third is this repository.
+
+**The bridge — [`DreamEnding/NX_MCP`](https://github.com/DreamEnding/NX_MCP) at `4a7c8811`.**
+Upstream requires Python 3.10+ and ships a C# GUI bridge and a Python batch bridge. This keeps only
+the Python one — the C# bridge would need recompiling against NX 12's assemblies, and loading an
+unsigned DLL needs an NX Open .NET author licence. Five modules (1,785 lines) were ported to 3.6.1:
+
+- `from __future__ import annotations` removed, then **256 annotations re-quoted** with an AST-offset
+  rewriter so they are never evaluated (`str | None` and `dict[str, int]` are 3.10/3.9 syntax). A
+  regex would have eaten comments and formatting; this does not.
+- A `dataclasses` stand-in for 3.6 that is **a pass-through above 3.7**, because Pydantic inspects
+  `__dataclass_fields__` and rejects anything that merely imitates a dataclass.
+- `str.isascii()`, `Path.unlink(missing_ok=True)` and the walrus operator replaced at their call
+  sites. All three were found by running the tools — none is visible by reading the code.
+- The extrude section rewritten: upstream's `CreateRuleCurveFeature([sketch], Null)` fails with NX
+  error 650004 on 12 and 2406 alike, so the section is now built by trying four combinations in
+  order, each attempt recording which call failed. A failure names the step instead of returning
+  "Bridge execution failed".
+
+[`nxsrc/PORT-NOTES.md`](nxsrc/PORT-NOTES.md) records each change with the evidence that prompted it.
+
+**The skill — [`EVOL233awa/nxopen-journal`](https://github.com/EVOL233awa/nxopen-journal) at
+`4b77d88` (v1.3.0).** A different author, not this account. Fetched at install time as a zip (so git
+is not needed) and junctioned into `~/.dsh/skills` and `~/.codex/skills`; **not vendored**, so you get
+their current code and they keep the copyright. Two of its files are patched locally, because it was
+written for NX 12 only:
+
+| file | what was wrong | what it does now |
+|---|---|---|
+| `SKILL.md` | "the journal interpreter is 3.6.1", stated as a fact | lists 3.6.1 / 3.10 / 3.12 per release, and says how to check |
+| `scripts/check_journal.py` | flagged `math.dist`, `functools.cache`, `itertools.pairwise` as errors unconditionally | takes a target version (`--python-version`, `--print-python`), defaulting to the 3.6 subset that runs on all three |
+
+Those patches are local and unmerged; they are the only divergence from upstream.
+
+**Everything else** — the executor, the probe, the installer, the MCP row, the examples — is written
+here, MIT, no upstream claim.
+
+## Three ways to drive NX
+
+| route | mechanism | use it when |
+|---|---|---|
+| **skill** (default) | the agent writes NXOpen Python; `run-journal` executes it | anything the agent has to compose: modelling, drafting, FEA, motion |
+| **`run-journal`** | one journal in, one verdict out | you already have a journal and want to know whether it worked |
+| **16 MCP tools** (opt-in) | typed calls against a resident batch NX | many small calls on one part, where the ~60 s cold start would dominate |
+
+The skill is on by default because it holds no NX. The tools are off because booting dsh should not
+wait for a CAD application.
+
+```
+  agent ──writes──▶ journal.py ──run-journal──▶ run_journal.exe ──▶ batch NX ──▶ .prt / .pdf / .stp
+                        │                             │
+                        │                             └── verdict from the log, not the exit code
+                        └── check_journal.py first (3.6 subset, runs on any release)
+
+  agent ──nx_* tools──▶ dsh-nx plugin ──stdio──▶ sidecar (venv-nx) ──loopback──▶ batch NX
 ```
 
-The agent reads `SKILL.md`, routes to the right domain file, writes a journal, checks it with `scripts/check_journal.py`, and runs it. `NX_HOME` must point at your install (`D:\UG` here), which `install` records.
-
-## Running one journal
-
-`run-journal` is for the half of the work the 16 tools do not cover — Drafting, GB frames, PDF —
-and for anyone who has a journal in hand and wants a verdict rather than a wall of NX output.
+## `run-journal`
 
 ```powershell
 dsh-nx run-journal .\part.py                       # workdir = the journal's folder
-dsh-nx run-journal .\part.py -w .\build -t 900     # explicit workdir and timeout (default 600)
+dsh-nx run-journal .\part.py -w .\build -t 900     # explicit workdir and timeout (default 600 s)
 dsh-nx run-journal .\part.py --expect DRAWING_OK   # require a token in the output
 dsh-nx run-journal .\part.py --allow-traceback     # the journal catches and logs exceptions
 dsh-nx run-journal .\part.py --log run1.log        # a different log file
 dsh-nx run-journal .\part.py --json                # machine-readable verdict
-dsh-nx run-journal .\part.py --no-kill             # on timeout, leave NX running (keep the scene)
+dsh-nx run-journal .\part.py --no-kill             # on timeout, leave NX running
 dsh-nx run-journal .\part.py --kill-grace 5        # seconds the tree gets to die (default 2)
 dsh-nx run-journal .\part.py --print-command       # show the command and env, run nothing
 ```
 
-It resolves the NX root (`NX_HOME`, then the recorded layout, then the probe), calls
-`UGII\ugiicmd.bat` first so the licence environment is set up, and writes the output to
-`<workdir>\<journal>.log`.
-
-On timeout it runs `taskkill /T /F` on the child's process tree — NX spawns helpers, and killing
-only the shell leaves `ugraf.exe` behind holding a licence seat — waits `--kill-grace` seconds,
-then re-checks the pid. The verdict says how many processes died and the JSON carries `killed` /
-`kill_ok`, so "timed out and cleaned up" is distinguishable from "timed out and left something
-running".
-
-**The output goes to a file descriptor, not a pipe.** A pipe needs a kernel handle some sandboxes
-refuse (`spawn EPERM`), and it would have to be teed into a log anyway. One descriptor is the whole
-path: the child writes, the log grows, and the console shows a tail of it.
-
-**The log is appended, and only the new bytes are judged.** Re-running keeps the evidence from the
-failed attempt, and the earlier `Traceback` cannot decide the later run.
-
-**The exit code is not the verdict.** NX batch exits `0xC0000409` after a clean journal, and a
-journal that swallows its own exception still exits `0`. So the verdict comes from the log:
+**Why the verdict is not the exit code.** `run_journal.exe` returns `0` for a journal that caught its
+own exception, and `0xC0000409` for a clean shutdown. Neither number means what a caller wants, so the
+log decides:
 
 | signal | verdict |
 |---|---|
@@ -133,134 +186,65 @@ journal that swallows its own exception still exits `0`. So the verdict comes fr
 | traceback **and** a non-clean exit | `uncaught exception (exit N)` — `--allow-traceback` does not forgive this |
 | traceback **and** a clean exit | fail by default, **warning** with `--allow-traceback` |
 | `--expect TOKEN` not found | fail |
-| exit code outside `0` / `0xC0000409` | fail, unless something above already did |
+| exit code outside `0` / `0xC0000409` | fail, unless a signal above already did |
 
 The exit code is what separates a crash from a robust journal: a per-step `try/except` that logs and
-carries on still ends in a clean exit, while a journal that stopped on the exception does not.
-`--allow-traceback` only forgives the second kind, so a real crash still fails.
+carries on still ends cleanly, while a journal that stopped on the exception does not.
 
-`UGII_USER_PROFILE_DIR` and `UGII_TMP_DIR` are pointed at `<workdir>\.nx-profile` and
-`<workdir>\.nx-tmp`. NX otherwise writes into `%LOCALAPPDATA%\Siemens` and `%TEMP%`, which is
-where an unattended run turns into `General Fault Exception` when those are not writable.
+**On timeout** it runs `taskkill /T /F` on the child's tree — NX spawns helpers, and killing only the
+shell leaves `ugraf.exe` holding a licence seat — waits `--kill-grace`, then re-checks the pid. The
+JSON carries `killed` and `kill_ok`.
 
-Running it from a sandboxed agent needs these paths outside the workspace:
+**The log is appended, and only this run's bytes are judged**, so a failed attempt stays on disk
+without deciding the next run.
 
-| path | access | why |
+## When it fails
+
+Symptoms seen on this machine, and what they actually mean:
+
+| symptom | actual cause | what to do |
 |---|---|---|
-| `C:\ProgramData\Siemens` | read | licence data (`siemens_SSQ.dat`) |
-| `%LOCALAPPDATA%\Siemens\NX<release>` | read/write | user profile and preferences |
-| `<NX_HOME>` | read | the install, `ugiicmd.bat`, `run_journal.exe` |
-| `%TEMP%` | read/write | NX's own scratch files |
-| `<workdir>` | read/write | parts, log, `.nx-profile`, `.nx-tmp` |
+| `doctor` says `nx not found` but `NX_HOME` is right | the sandbox cannot read the install, so the interpreter probe never ran | read the line after it — it names the reason; whitelist the paths below |
+| a run stops at `failed to initialize UFUN 948792` | NX cannot reach its licence or profile directory | whitelist `C:\ProgramData\Siemens` and `%LOCALAPPDATA%\Siemens\NX<release>`, or set `UGII_USER_PROFILE_DIR` |
+| verdict fails with a traceback, but the journal finished | a per-step journal logs tracebacks by design | add `--allow-traceback`, or gate on `--expect` |
+| `tools/list` returns nothing | the bridge was started during the MCP handshake, which times out first | `dsh-nx bridge-start` **before** starting dsh |
+| the plugin fails to load with `ERR_MODULE_NOT_FOUND` | a `link:` plugin cannot see `@deepseek-ai/dsh-mcp-client` | add the junction under [The plugin row](#the-plugin-row) |
+| `doctor` names a copy on disk | the working tree and the installed copy are separate | update the one it names |
+| the log is 100 bytes though the journal did plenty | NX buffers stdout when it is not a console | judge on `--expect`, or on the journal's own file log |
+| a timeout leaves `ugraf.exe` behind | earlier builds killed only the shell | current versions kill the tree; `--no-kill` is opt-in, not the default |
 
-A read-only default workdir — the journal's own folder, when the bundle is loaded out of a profile
-junction — falls back to `%TEMP%\dsh-nx-run-<pid>` with a line saying so, instead of failing on
-`EPERM`.
+## How this was tested
 
-### Examples
-
-| journal | what it does |
-|---|---|
-| `examples/smoke.py` | smallest thing that proves a machine can run one — prints the interpreter, imports `NXOpen`, prints `SMOKE_OK` |
-| `examples/a_model.py` | a full part: boss + bore + keyway + pocket + holes, with body-count assertions per step; writes `sw_model.prt`, prints `MODEL_DONE` |
-| `examples/b_drawing.py` | GB A3 drawing of that part: three views at 2:1, 12 dimensions, frame, title block, notes, PDF; ends with a product check (`.prt` > 50 KB, PDF > 2 KB, exactly 12 dimensions) that prints `DRAWING_PRODUCTS_OK` |
-
-[`examples/README.md`](examples/README.md) covers what each one needs — a licence seat, a writable
-workdir, and for the drawing one, the part from the previous step.
-
-```powershell
-dsh-nx run-journal examples\smoke.py --expect SMOKE_OK
-dsh-nx run-journal examples\a_model.py --expect MODEL_DONE -w D:\nx-work
-dsh-nx run-journal examples\b_drawing.py --expect DRAWING_PRODUCTS_OK -w D:\nx-work --allow-traceback
-```
-
-Both of the larger examples were run end to end on NX 2406 — 17.9 s for the drawing, 204 KB `.prt`,
-48 KB `.pdf`, 67 KB `.stl`. `b_drawing.py` resolves the skill from `NXOPEN_JOURNAL_SKILL` or
-`~/.dsh/skills`; nothing is pinned to one machine.
-
-**An NX that is already open cannot be driven.** NXOpen runs in-process, so there is no external
-handle into the GUI session — `run-journal` and the bridge both start their own batch NX. If you
-want to reuse an open session, the only route is running the journal inside it by hand
-(Tools → Journal → Run).
-
-## Using the tools
-
-Two steps, in this order, because a batch NX session takes about a minute to come up — longer
-than an MCP client waits for `tools/list`. If the bridge is started during the handshake, the
-tools never appear, which is exactly what happened the first time this was wired up.
-
-```powershell
-dsh-nx bridge-start        # starts a batch NX session and waits for it
-$env:NX_ENABLE_MCP = "1"
-dsh --profile web          # the nx row now connects immediately
-```
-
-`bridge-start` leaves NX running; `dsh-nx bridge-stop` ends it. NX is busy while the bridge
-lives, so do this when you want the agent driving NX, not all day. `serve` refuses to cold-start
-for exactly this reason and tells you to run `bridge-start` first.
-
-```
-tools/list → 16 tools
-nx_status  → {"connected": true, "nx_version": "v12", "bridge_implementation": "python_batch"}
-```
-
-Manual control, if you want it without dsh:
-
-```powershell
-dsh-nx where            # every path it will use
-dsh-nx run-journal .\part.py    # one journal, with a verdict
-dsh-nx bridge-start     # start the batch NX session (detached)
-dsh-nx serve            # sidecar on stdio, against a running bridge
-dsh-nx bridge-stop      # ask the bridge to stop
-```
-
-## What is verified
-
-Verified on **NX 12.0.0.27 (Python 3.6.1)** and **NX 2406.1700 (Python 3.10)** on Windows 11:
-
-- the ported modules import inside NX 12's 3.6.1, and `NXOpen` answers (`UGII_VERSION: v12`);
-- the bridge starts, authenticates, answers `nx_status` with `connected: true`, and stops cleanly;
-- the sidecar lists all 16 tools over stdio and forwards `nx_status`;
-- `dsh-nx bridge-start` brings the bridge up detached, `serve` reuses it, and neither leaves an
-  orphan process;
-- in dsh itself, with the bridge already up, the model called `mcp__nx__nx_status` and got
-  `connected: true`.
-
-**All sixteen tools work** on both 12.0.0.27 and 2406.1700: part, sketch, rectangle, line, finish, extrude, undo,
-the three list tools, STEP export, save, close, fit and open. `nxsrc/PORT-NOTES.md` records the
-3.6/3.9 gaps the runs exposed and the two diagnostics kept from finding them.
-
-**NX 2506 (Python 3.12) is expected, not verified.** What has been checked without the release
-installed: every ported module parses under the 3.6, 3.10 and 3.12 grammars, the five in-NX modules
-import and build their dataclasses on 3.12, and the probe labels a 3.12 build `expected` rather than
-`verified`. What has *not* been checked: an actual NX 2506 session. Nothing in the code branches on
-the interpreter, so the risk is in NX's own API rather than in Python — run one part through the
-skill and, if it passes, add the release to `VERIFIED_PYTHON` in `lib/probe.py` and to the table at
-the top of this file.
-
-`run-journal` is verified on 2406.1700 against three cases, each of which has to produce a different
-verdict from the same code path:
-
-| journal | expected | result |
+| | NX 12.0.0.27 | NX 2406.1700 |
 |---|---|---|
-| `examples/smoke.py` | ok | `verdict: ok`, 10.1 s, exit `0xC0000409` treated as clean |
-| one that raises | fail | `uncaught exception (log contains "Traceback …")`, exit 1 |
-| one that sleeps past `--timeout 5` | fail | `timeout: NX did not exit in time`, killed at 5.2 s |
-| one that catches an exception and still finishes | fail, then ok | `Traceback` is a reason by default, a warning under `--allow-traceback` |
-| the same journal run twice into one log | ok both times | 2 records in the file, second run judged only on its own bytes |
+| five in-NX modules import | 3.6.1 | 3.10 |
+| bridge starts, `nx_status` answers | `connected: true`, `v12` | `connected: true`, `v2406` |
+| 16 tools | pass | pass |
+| `examples/a_model.py` | — | pass, `.prt` written |
+| `examples/b_drawing.py` | — | 17.9 s; `.prt` 204 KB, `.pdf` 48 KB, `.stl` 67 KB |
 
-The skill route does not depend on any of this: `run_journal_batch.bat` was verified end to end,
-writing a journal result file from a batch NX started with the `NX_HOME` that `install` sets.
+The verdict logic was checked against four journals on 2406. Each must produce a different answer from
+the same code path, or the logic is not doing anything:
 
-The skill route is version-aware too. `SKILL.md` lists the interpreter per release (12 = 3.6.1,
-2406 = 3.10, 2506 = 3.12) and `check_journal.py` defaults to the 3.6 subset — the one that runs on
-all three — with `--python-version 3.10|3.12` to relax the API checks and `--print-python` to read
-the answer out of `NX_HOME`. Those two files are the only local divergence from the pinned
-upstream: `install.ps1` skips the skill when `SKILL.md` is already present, so the edits survive
-`dsh-nx install`, but deleting the skill directory refetches upstream text and loses them.
+| journal | expected | observed |
+|---|---|---|
+| `examples/smoke.py` | ok | ok, 10.1 s, exit `0xC0000409` treated as clean |
+| one that raises | fail | `uncaught exception (exit 1)` |
+| one that catches and finishes | fail, then ok | traceback is a reason by default, a warning under `--allow-traceback` |
+| one that sleeps past `--timeout 5` | fail | `timeout … killed 4 process(es)`, back in 7.2 s |
 
-## Attribution
+To reproduce the first one:
 
-- `nxsrc/` is [`DreamEnding/NX_MCP`](https://github.com/DreamEnding/NX_MCP) at `4a7c8811`, MIT, patched for Python 3.6. Licence kept at `nxsrc/LICENSE-DreamEnding-NX_MCP`.
-- The skill is [`EVOL233awa/nxopen-journal`](https://github.com/EVOL233awa/nxopen-journal) at `4b77d88`, MIT, fetched at install time — not vendored.
-- This package adds the Python 3.6 compatibility layer, the install/lifecycle wrapper, and the opt-in MCP row. MIT.
+```powershell
+dsh-nx run-journal examples\smoke.py --expect SMOKE_OK --json
+```
+
+CI needs no NX: the ported sources parse under the 3.6, 3.10 and 3.12 grammars; the five in-NX modules
+import and build their dataclasses; the probe reports the right support level for a fake install of
+each interpreter.
+
+## Licence
+
+MIT, Copyright (c) 2026 27painter — see [LICENSE](LICENSE). `nxsrc/` keeps upstream's licence at
+[`nxsrc/LICENSE-DreamEnding-NX_MCP`](nxsrc/LICENSE-DreamEnding-NX_MCP). The skill keeps its own and is
+not redistributed here.
