@@ -9,6 +9,15 @@ plus the ``from __future__ import annotations`` line those modules carried.
 Python 3.10+, and there it must get the real ``dataclasses`` — Pydantic inspects
 ``__dataclass_fields__`` and rejects anything that merely imitates one. Only the
 embedded 3.6 interpreter takes the shim branch.
+
+The interpreters NX embeds, and what each one gets:
+
+    NX 12      CPython 3.6.1   shim branch (verified)
+    NX 2406    CPython 3.10    pass-through (verified)
+    NX 2506    CPython 3.12    pass-through (same code path, not yet run)
+
+Nothing here is a version switch: the branch is chosen by what imports, so a
+release with a newer interpreter cannot silently land in the 3.6 path.
 """
 try:  # 3.7+
     from dataclasses import asdict, dataclass, field  # noqa: F401

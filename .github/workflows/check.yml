@@ -24,28 +24,79 @@ jobs:
           node --check lib/paths.mjs
           node --check bin/dsh-nx.mjs
 
-      # The bridge runs inside NX 12, which embeds CPython 3.6.1. Parse the
-      # shipped sources against that grammar so a 3.7+ construct fails here
-      # rather than on a machine with NX installed.
-      - name: Ported sources must parse as Python 3.6
+      # The bridge runs inside NX, so it has to parse on the oldest grammar any
+      # supported release ships: NX 12 embeds CPython 3.6.1. The 3.10 and 3.12
+      # passes are there for the other direction — a construct that is fine on
+      # 3.6 but gone from a newer grammar (nothing today, cheap to keep honest).
+      - name: Ported sources must parse as 3.6, 3.10 and 3.12
         run: |
           python - <<'PY'
           import ast, pathlib, sys
+          versions = [(3, 6), (3, 10), (3, 12)]
           bad = []
           for path in sorted(pathlib.Path("nxsrc").rglob("*.py")):
               if path.name == "server.py":
                   continue  # sidecar, runs on the host interpreter
-              try:
-                  ast.parse(path.read_text(encoding="utf-8"), filename=str(path), feature_version=(3, 6))
-              except SyntaxError as exc:
-                  bad.append("%s:%s %s" % (path, exc.lineno, exc.msg))
-          print("\n".join(bad) if bad else "all ported modules parse as 3.6")
+              source = path.read_text(encoding="utf-8")
+              for version in versions:
+                  try:
+                      ast.parse(source, filename=str(path), feature_version=version)
+                  except SyntaxError as exc:
+                      bad.append("%s [%d.%d]:%s %s" % (path, version[0], version[1], exc.lineno, exc.msg))
+          print("\n".join(bad) if bad else "all ported modules parse as 3.6, 3.10 and 3.12")
           sys.exit(1 if bad else 0)
+          PY
+
+      # Parsing proves the grammar; this proves the modules actually load and
+      # that the dataclasses the tool layer depends on work. No NXOpen, no NX.
+      - name: Ported modules import without NX
+        run: |
+          python - <<'PY'
+          import pathlib, sys
+          sys.path.insert(0, str(pathlib.Path("nxsrc").resolve()))
+          for name in ("nx_mcp._compat", "nx_mcp.runtime", "nx_mcp.workspace",
+                       "nx_mcp.bridge", "nx_mcp.nx_bridge"):
+              __import__(name)
+          from nx_mcp._compat import asdict, is_shim
+          from nx_mcp.runtime import ObjectRef
+          ref = ObjectRef(id="obj_1", kind="part", name="n", part_id="p1")
+          assert asdict(ref)["kind"] == "part"
+          assert is_shim() is False, "3.7+ must get the real dataclasses"
+          print("imported 5 modules on", sys.version.split()[0])
           PY
 
       - name: Compile the helper scripts
         run: |
           python -m py_compile lib/probe.py
+
+      # The probe decides whether a release is driveable, so its version table
+      # is worth a test that does not need the release installed.
+      - name: Probe reports the right support level per interpreter
+        run: |
+          python - <<'PY'
+          import json, os, pathlib, subprocess, sys, tempfile
+          cases = {
+              "python36.dll": ("3.6", "verified"),
+              "python310.dll": ("3.10", "verified"),
+              "python312.dll": ("3.12", "expected"),
+              "python313.dll": ("3.13", "expected"),
+          }
+          root = pathlib.Path(tempfile.mkdtemp())
+          for dll, (expected_python, expected_level) in cases.items():
+              home = root / dll.replace(".dll", "")
+              (home / "NXBIN").mkdir(parents=True)
+              (home / "NXBIN" / "run_journal.exe").write_bytes(b"")
+              (home / "NXBIN" / dll).write_bytes(b"")
+              env = dict(os.environ, UGII_BASE_DIR=str(home))
+              env.pop("NX_HOME", None)
+              out = subprocess.run([sys.executable, "lib/probe.py"], capture_output=True,
+                                   text=True, env=env, check=True).stdout
+              data = json.loads(out.strip().splitlines()[-1])
+              assert data["nxopen_python"] == expected_python, (dll, data["nxopen_python"])
+              assert data["support"] == expected_level, (dll, data["support"])
+              assert data["supported"] is True
+          print("probe support levels OK")
+          PY
 
       - name: Resolve paths without NX installed
         run: node bin/dsh-nx.mjs where

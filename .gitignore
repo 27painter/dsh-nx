@@ -12,3 +12,7 @@ __pycache__/
 *.prt
 *.step
 *.log
+
+# run-journal redirects these into the workdir
+.nx-profile/
+.nx-tmp/

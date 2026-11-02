@@ -1,9 +1,15 @@
 #!/usr/bin/env node
-// dsh-nx: install / doctor / where / serve for Siemens NX 12.
+// dsh-nx: install / doctor / where / serve for Siemens NX.
+//
+// NX 12, 2406 and 2506 all work: the bridge is written for the oldest
+// interpreter (NX 12's CPython 3.6.1) and shims forward, so a newer build runs
+// the same code with the shims inert. What differs per release is the
+// interpreter NX embeds -- 3.6 / 3.10 / 3.12 -- which is what `doctor` reports.
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { PKG, PKG_ROOT, exists, resolveLayout, configPath } from "../lib/paths.mjs";
+import { parseRunJournalArgs, runJournal } from "../lib/run-journal.mjs";
 
 const LOG = "[dsh-nx]";
 const say = (m) => console.error(`${LOG} ${m}`);
@@ -98,21 +104,41 @@ function cmdDoctor() {
   if (!nx || !nx.installed) {
     say("nx        not found (set UGII_BASE_DIR or NX_HOME)");
   } else {
-    say(`nx        ${nx.root}  version ${nx.version || "unknown"}  NXOpen Python ${nx.nxopen_python}`);
+    say(`nx        ${nx.root}  version ${nx.version || "unknown"}  NXOpen Python ${nx.nxopen_python}  [${nx.support}]`);
+    say(`nx        ${nx.support_note}`);
+    // Several releases can sit side by side; the probe already picked one, but
+    // silently driving a different NX than the one on screen is how you spend an
+    // afternoon on the wrong file.
+    const others = (nx.installations || []).filter((item) => !item.chosen);
+    if (others.length) {
+      const list = others
+        .map((item) => `${item.root} (Python ${item.nxopen_python}, ${item.support})`)
+        .join("; ");
+      say(`nx        also installed: ${list}`);
+      say("nx        set NX_HOME to drive a different one; the environment variable always wins");
+    }
     if (!nx.supported) {
-      say(`nx        needs Python 3.6 or newer inside NX; this build embeds ${nx.nxopen_python}`);
-    } else if (!nx.is_nx12) {
-      // Later builds embed 3.10+, so the ported bridge runs unchanged and
-      // upstream would work here too.
-      say(`nx        Python ${nx.nxopen_python} inside NX — the ported bridge runs unchanged, no 3.6 shims needed`);
+      say(`nx        this build cannot be driven: ${nx.support_note}`);
+    } else if (nx.support === "expected") {
+      say("nx        not a warning — run one real part through the skill, then add the release to VERIFIED_PYTHON");
     }
   }
   const venv = venvPython(layout);
   say(`venv-nx   ${exists(venv) ? venv : "missing (run: dsh-nx install)"}`);
   say(`skill     ${exists(layout.skillFile) ? layout.skillDir : "missing (run: dsh-nx install)"}`);
+  // The row is opt-in, so "the nx_* tools are not in my tool list" is the normal
+  // state, not a fault. Say which state this shell is in.
+  say(
+    `mcp row   ${
+      process.env.NX_ENABLE_MCP === "1"
+        ? "on (NX_ENABLE_MCP=1) — bridge must be running before the client connects"
+        : "off (NX_ENABLE_MCP is not 1) — nx_* tools are not registered; the skill route still works"
+    }`,
+  );
   const b = bridgePaths(layout);
   say(`bridge    ${bridgeAlive(layout) ? "running" : "not running"}`);
-  process.exit(nx && nx.installed && exists(venv) && exists(layout.skillFile) ? 0 : 1);
+  const ready = nx && nx.installed && nx.supported && exists(venv) && exists(layout.skillFile);
+  process.exit(ready ? 0 : 1);
 }
 
 // ------------------------------------------------------------------ where
@@ -211,9 +237,13 @@ function cmdServe() {
     die(
       "the NX bridge is not running, so there is nothing for the tools to talk to.\n" +
         "A batch NX session takes about a minute to come up — longer than an MCP client\n" +
-        "waits for tools/list — so start it first, then connect://n//n" +
-        "  dsh-nx bridge start\n\n" +
-        "(The skill route does not need the bridge.)",
+        "waits for tools/list — so start it first, then connect:\n" +
+        "  dsh-nx bridge-start\n\n" +
+        "An NX that is already open in the GUI cannot be driven: NXOpen runs in-process,\n" +
+        "so an external agent has no way into that session. The bridge starts its own\n" +
+        "batch NX instead.\n\n" +
+        "(The skill route does not need the bridge: `dsh-nx run-journal` starts a batch\n" +
+        "NX per journal and exits.)",
     );
   }
   say(`using the running bridge (${b.descriptor})`);
@@ -265,10 +295,26 @@ switch (cmd) {
     stopBridge(resolveLayout());
     say("stop file written");
     break;
+  case "run-journal": {
+    let parsed;
+    try {
+      parsed = parseRunJournalArgs(process.argv.slice(3));
+    } catch (err) {
+      say(err.message);
+      process.exit(2);
+    }
+    process.exitCode = await runJournal(parsed.journal, { ...parsed.options, layout: resolveLayout() });
+    break;
+  }
   case "version":
     console.log(PKG.version);
     break;
   default:
-    console.error(`usage: dsh-nx <install|doctor|where|serve|bridge-start|bridge-stop|version>`);
+    console.error(
+      "usage: dsh-nx <install|doctor|where|serve|run-journal|bridge-start|bridge-stop|version>\n" +
+        "       dsh-nx run-journal <journal.py> [--workdir DIR] [--timeout SEC]\n" +
+        "                         [--expect TOKEN]... [--fail-on REGEX]... [--json] [--quiet]\n" +
+        "                         [--print-command]",
+    );
     process.exit(2);
 }

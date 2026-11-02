@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Start the ported NX bridge inside NX 12 and keep pumping until told to stop.
+"""Start the ported NX bridge inside NX and keep pumping until told to stop.
+
+Works on NX 12 (CPython 3.6.1), NX 2406 (3.10) and NX 2506 (3.12): the modules
+below are written for the oldest of those and shim forward.
 
 Run with:  run_journal.exe bridge_journal.py
 Environment:
@@ -17,8 +20,12 @@ import os
 import sys
 import traceback
 
-SRC = os.environ.get("NX_MCP_SRC", r"C:\Users\27painter\WorkBuddy AI\2026-10-18-17-03-38\.tmp\nx36\src")
-LOG = os.environ.get("NX_MCP_SMOKE_RESULT", r"C:\Users\27painter\WorkBuddy AI\2026-10-18-17-03-38\.tmp\nx36\bridge-log.txt")
+# Default to this file's own folder: run_journal starts the journal from an
+# arbitrary working directory, and a hard-coded path here would make the journal
+# work on exactly one machine.
+_HERE = os.path.dirname(os.path.abspath(globals().get("__file__") or "."))
+SRC = os.environ.get("NX_MCP_SRC", _HERE)
+LOG = os.environ.get("NX_MCP_SMOKE_RESULT", os.path.join(_HERE, "bridge-log.txt"))
 
 log = io.open(LOG, "w", encoding="utf-8", buffering=1)
 

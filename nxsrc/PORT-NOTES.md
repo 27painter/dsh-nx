@@ -185,6 +185,41 @@ evaluated, and the stdlib replacements are backwards compatible.
 All sixteen tools pass on 2406 as well. `dsh-nx doctor` now reports the embedded
 interpreter and says so, instead of warning that the build is "untested".
 
+## NX 2506
+
+**Not run yet.** NX 2506 embeds CPython 3.12, so it takes the same pass-through
+branch 2406 does; nothing in the code switches on the interpreter version, it
+switches on what imports.
+
+What was checked without a 2506 install:
+
+- every ported module parses under `feature_version` 3.6, 3.10 **and** 3.12 (CI,
+  `check.yml`);
+- the five in-NX modules import on 3.12 and 3.13, build their dataclasses and
+  `asdict()` them, with `_compat.is_shim()` false — i.e. the real `dataclasses`,
+  not the 3.6 stand-in (CI, same file);
+- `lib/probe.py` reports a 3.12 build as `expected`, not `verified` (CI builds a
+  fake NXBIN tree per interpreter and asserts the label).
+
+Why the Python side is low-risk: the 3.6 workarounds were all *substitutions for
+missing features* (`dataclasses`, `isascii`, `Literal`, `unlink(missing_ok)`,
+walrus, `zip(strict)`), and every substitute is valid on 3.12. Nothing relies on
+behaviour that 3.11/3.12 removed — no `distutils`, no `imp`, no
+`asyncio.coroutine`, no `ast.Str`, no `getargspec`.
+
+Where the risk actually is: **NXOpen, not Python.** The 16 tools touch a small,
+old API surface (`Point`, `Vector`, `Sketch` enums, `BasePart.Close*`,
+`Session.Parts`/`UndoToMark`, `ScRuleFactory`, `Bodies`/`Sketches`/`Sections`),
+and `_extrude` already tries four section-builder combinations rather than
+assuming one signature — that is what made it survive the 12-vs-2406 difference.
+A 2506 change would show up there, as an NX error, not as a Python traceback.
+
+To promote 2506 from `expected` to `verified`: run one part through the skill
+(`nx_create_part` → sketch → rectangle → extrude → `nx_export_step`), then add
+`"3.12": "NX 2506"` to `VERIFIED_PYTHON` in `lib/probe.py` and update the table at
+the top of the README. `NX_MCP_DEBUG_ERRORS=1` surfaces the underlying exception
+if a call fails.
+
 ## Licence
 
 Upstream is MIT. This fork keeps `LICENSE` and adds only the compatibility layer described
