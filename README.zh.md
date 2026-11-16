@@ -2,6 +2,8 @@
 
 [English](README.md) | 中文
 
+[![npm](https://img.shields.io/npm/v/dsh-nx?logo=npm)](https://www.npmjs.com/package/dsh-nx)
+
 > 别的 NX MCP 告诉 agent 该做什么，**dsh-nx 告诉它到底做成了没有。**
 
 让 DeepSeek Harness 的 agent 驱动 Siemens NX **2406 与 2506**——**以及 NX 12**，那一版上游桥根本够
@@ -28,11 +30,18 @@ NXOpen 跑在 NX 进程内，所以自动化的唯一办法是起一个批处理
 NX 本身既不安装也不修改。`install.ps1` 建一个给 sidecar 用的 venv、取回 pinned 技能、并做好 junction。
 
 ```powershell
-git clone https://github.com/27painter/dsh-nx
-cd dsh-nx
-npm install -g .            # 把 dsh-nx 放进 PATH
+npm install -g dsh-nx       # 把 dsh-nx 放进 PATH
 dsh-nx install              # [1/5] python  [2/5] venv-nx  [3/5] 技能  [4/5] NX_HOME  [5/5] junction
 dsh-nx doctor               # 只读；缺东西时退出码 1
+```
+
+想读代码或改代码，就从仓库装：
+
+```powershell
+git clone https://github.com/27painter/dsh-nx
+cd dsh-nx
+npm install -g .
+dsh-nx install
 ```
 
 `dsh-nx install` 是对 `install.ps1` 的薄包装；想直接看脚本输出就跑脚本：
@@ -42,7 +51,7 @@ dsh-nx doctor               # 只读；缺东西时退出码 1
 .\install.ps1 -BaseDir "E:\cad" -Force      # 换位置 / 重建
 ```
 
-包还没发到 npm，所以 `npm install -g dsh-nx` 现在解析不到。
+npm 上这个包装的是 CLI 和安装器，不是预编译好的 NX sidecar——第一次 `dsh-nx install` 仍然要建 venv、取回 pinned 技能。
 
 ### 开始之前
 
@@ -109,7 +118,7 @@ New-Item -ItemType Junction -Path $dst -Target $src
 | NX 12（12.0.0.27，CPython 3.6.1） | 16 个工具、技能、`run-journal` 在真实零件上跑过；示例没有在这里重跑 |
 | 16 个 MCP 工具 | 只覆盖建模与导出——**不含 Drafting**：没有视图投影、没有尺寸、没有标题栏、没有 GB 图框、没有 PDF |
 | 驱动你已经打开的那个 NX 窗口 | **做不到**，这是 NXOpen 的进程模型决定的 |
-| npm 上的包 | 还没发布 |
+| npm 上的包 | 已发布——`npm install -g dsh-nx` 给的是 CLI 和安装器；NX sidecar 仍要在第一次运行时本地构建 |
 
 要从 NX 出图，无论走哪条路都落在 journal 上——工具做不了，这份 README 也不假装它能。
 

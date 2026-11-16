@@ -2,6 +2,8 @@
 
 English | [中文](README.zh.md)
 
+[![npm](https://img.shields.io/npm/v/dsh-nx?logo=npm)](https://www.npmjs.com/package/dsh-nx)
+
 > Other NX MCP servers tell the agent what to do. **dsh-nx tells it whether it actually worked.**
 
 Drive Siemens NX **2406 and 2506** from a DeepSeek Harness agent — and **NX 12** as well, the release
@@ -30,11 +32,18 @@ NX is neither installed nor modified. `install.ps1` builds a venv for the sideca
 skill, and junctions it in.
 
 ```powershell
-git clone https://github.com/27painter/dsh-nx
-cd dsh-nx
-npm install -g .            # puts `dsh-nx` on PATH
+npm install -g dsh-nx       # puts `dsh-nx` on PATH
 dsh-nx install              # [1/5] python  [2/5] venv-nx  [3/5] skill  [4/5] NX_HOME  [5/5] junctions
 dsh-nx doctor               # read-only; exit 1 when something is missing
+```
+
+From a checkout instead, when you want to read or change the code:
+
+```powershell
+git clone https://github.com/27painter/dsh-nx
+cd dsh-nx
+npm install -g .
+dsh-nx install
 ```
 
 `dsh-nx install` is a thin wrapper around `install.ps1`; run the script directly to see its output:
@@ -44,7 +53,8 @@ dsh-nx doctor               # read-only; exit 1 when something is missing
 .\install.ps1 -BaseDir "E:\cad" -Force      # different location / rebuild
 ```
 
-The package is not on npm, so `npm install -g dsh-nx` does not resolve.
+The npm package carries the CLI and the installer, not a prebuilt NX sidecar: the first `dsh-nx install`
+still builds the venv and fetches the pinned skill.
 
 ### Before you start
 
@@ -114,7 +124,7 @@ Everything below is scoped by this table.
 | NX 12 (12.0.0.27, CPython 3.6.1) | 16 tools, the skill and `run-journal` on a real part; the worked examples were not re-run here |
 | the 16 MCP tools | modelling and export only — **no Drafting**: no view projection, dimension, title block, GB frame or PDF |
 | driving an NX window you already have open | **not possible**, by design of NXOpen |
-| the package on npm | not published |
+| the package on npm | published — `npm install -g dsh-nx` gives the CLI and the installer; the NX sidecar is still built locally on first run |
 
 If you need a drawing out of NX, that is a journal job whichever route you take — the tools cannot do
 it, and this README does not claim otherwise.
