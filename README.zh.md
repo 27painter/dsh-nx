@@ -2,7 +2,9 @@
 
 [English](README.md) | 中文
 
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![npm](https://img.shields.io/npm/v/dsh-nx?logo=npm)](https://www.npmjs.com/package/dsh-nx)
+[![awesome-dsh-plugin](https://img.shields.io/static/v1?label=awesome-dsh-plugin&message=listed&color=blue)](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
 
 > 别的 NX MCP 告诉 agent 该做什么，**dsh-nx 告诉它到底做成了没有。**
 

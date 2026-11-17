@@ -2,7 +2,9 @@
 
 English | [中文](README.zh.md)
 
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![npm](https://img.shields.io/npm/v/dsh-nx?logo=npm)](https://www.npmjs.com/package/dsh-nx)
+[![awesome-dsh-plugin](https://img.shields.io/static/v1?label=awesome-dsh-plugin&message=listed&color=blue)](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
 
 > Other NX MCP servers tell the agent what to do. **dsh-nx tells it whether it actually worked.**
 
