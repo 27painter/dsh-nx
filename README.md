@@ -13,7 +13,8 @@ the upstream bridge cannot reach at all, because it needs Python 3.10+ and NX 12
 
 NXOpen runs inside NX, so automation means starting a batch NX and running a journal inside it. This
 repository is that runtime: one codebase across the three releases, an executor that reports whether
-the journal did what it was asked, and a probe that keeps the releases apart.
+the journal did what it was asked, a probe that keeps the releases apart — and, since 1.3.0, a way to
+**read the part back**: open it in NX, measure it, and compare against what you expected.
 
 ## What was missing, and what this adds
 
@@ -150,15 +151,18 @@ execute the same code with the shims inert, and NX 12 runs it too.
 |---|---|---|
 | `nxsrc/` | 3,030 (30 files) | the bridge that runs *inside* NX — ported, see [What it builds on](#what-it-builds-on) |
 | `nxsrc/nx_mcp/nx_bridge.py` + `bridge.py` | 766 + 872 | the ported core: session, JSON-RPC over loopback, 16 tool implementations |
-| `lib/run-journal.mjs` | 408 | the executor: resolve NX, run, judge, kill |
+| `lib/run-journal.mjs` | 411 | the executor: resolve NX, run, judge, kill |
 | `lib/probe.py` | 243 | finds every NX install and labels what each one can do |
-| `bin/dsh-nx.mjs` | 374 | `install` / `doctor` / `where` / `serve` / `run-journal` / `bridge-start` / `bridge-stop` |
+| `bin/dsh-nx.mjs` | 429 | `install` / `doctor` / `where` / `serve` / `run-journal` / `verify` / `deliver` / `mode` / `bridge-start` / `bridge-stop` |
 | `lib/capture.mjs` | 74 | runs a child through a file descriptor instead of a pipe |
 | `lib/nx-root.mjs` + `lib/paths.mjs` | 77 + 71 | one resolver for "which NX", and the layout defaults |
 | `install.ps1` | 155 | venv, the pinned skill, the junctions, `NX_HOME` |
+| `lib/verify_journal.py` + `lib/verify.mjs` | 205 + 227 | opens a `.prt` inside NX and reports bodies, faces, volume, mass and bounding box; `verify` compares them with `--expect-*` |
+| `lib/deliver.mjs` | 282 | checks the exchange files without starting NX: STEP schema and bounding box, STL triangles, PDF sheet and text layer |
+| `lib/standards.json` | — | the value table half-delivery judges against (copied from `dsh-sw-cad`, same source) |
 | `examples/` | 4 journals | a volume check, a smoke test, a part, and a GB A3 drawing of that part |
 
-Original code in `bin/`, `lib/` and `install.ps1`: 1,402 lines.
+Original code in `bin/`, `lib/` and `install.ps1`: 2174 lines.
 
 ## Three ways to drive NX
 
@@ -234,6 +238,65 @@ JSON carries `killed` and `kill_ok`.
 **The log is appended, and only this run's bytes are judged**, so a failed attempt stays on disk
 without deciding the next run.
 
+## Delivery check
+
+`run-journal` answers "did the journal finish". Two commands answer the next question.
+
+**`verify` — read the part back.** A `.prt` is a binary only NX can read, so the reading happens inside
+NX: a small journal opens the file, measures it, and prints one JSON line. `verify` compares that with
+what you expected.
+
+```powershell
+dsh-nx verify part.prt --expect-volume 76223 --tol 0.5
+dsh-nx verify part.prt --expect-bbox 101x50x32 --expect-bodies 1
+```
+
+```
+sw测试  bodies 1, faces 19, edges 47
+  volume 76223.097 mm³   mass 0.596876 kg
+  bbox   101.00 x 50.00 x 32.00 mm
+  ok   volume     76223.097 mm³
+  ok   bodies     1
+OK  11.4s  -> part.verify.json
+```
+
+That is a real part on NX 2406, 11.4 s including NX's own start. `verify` writes `<part>.verify.json`
+with the measurements, the expectations and the problems.
+
+**`deliver` — check what else landed.** No NX needed: STEP schema and bounding box, STL triangles, PDF
+sheet size and text layer, and a reminder that a `.prt` is present but unmeasured.
+
+```powershell
+dsh-nx deliver D:\nx-work --require pdf,step
+```
+
+```
+pdf     sw_test.pdf  48236 B
+  ok   pdf.sheet          297 x 420 mm (A3)
+  ok   pdf.text           font objects present (text layer likely)
+stl     sw_test.stl  67284 B
+  ok   stl.triangles      1344 triangle(s)
+  ok   stl.bbox           bounding box 101.00 x 50.00 x 32.00
+part    sw_test.prt  204099 B
+  warn part.unverified    geometry not read: run `dsh-nx verify` to measure it
+```
+
+**Two profiles.** `normal` (default) checks the files. `half` also requires the material, fits and finish
+written on the part to come from `lib/standards.json`; in NX they live as part attributes and named
+expressions, so they are read from the part rather than from the plot. A part with no material assigned
+fails — which is what NX itself reports, as `NX_MaterialMissingAssignments=TRUE`.
+
+```powershell
+dsh-nx mode half      # set once; every later verify inherits it
+dsh-nx mode           # what is set now
+```
+
+The choice is made once per job, not per part. `verify.json` records `profile` and what is still
+unchecked: **a half-delivery pass is not full compliance**.
+
+What it does not check: whether a tolerance is the *right* one (only that it comes from the table),
+material suitability, 审签, and dimension-chain closure.
+
 ## When it fails
 
 Symptoms seen on this machine, and what they actually mean:
@@ -304,6 +367,19 @@ the same code path, or the logic is not doing anything:
 | one that raises | fail | `uncaught exception (exit 1)` |
 | one that catches and finishes | fail, then ok | traceback is a reason by default, a warning under `--allow-traceback` |
 | one that sleeps past `--timeout 5` | fail | `timeout … killed 4 process(es)`, back in 7.2 s |
+
+`verify` and `deliver` were checked against a real part and its exports, not fixtures alone:
+
+| what | expected | observed |
+|---|---|---|
+| `verify` on `sw测试.prt` (2406) | measure it | 1 body, 19 faces, 47 edges, 76223.097 mm³, 0.596876 kg, bbox 101 × 50 × 32, 11.4 s |
+| `verify --expect-volume 76223 --expect-bbox 101x50x32 --expect-bodies 1 --tol 0.5` | pass | pass |
+| `verify --expect-volume 125000 --expect-bodies 2` | fail | fail, both named |
+| `deliver` on the same folder | read the exports | PDF 297 × 420 mm (A3) with font objects; STL 1,344 triangles, bbox 101 × 50 × 32 |
+| `verify --profile half` on that part | fail | fail: `NX_MaterialMissingAssignments=TRUE`, no Ra on the part |
+
+The STL bounding box and the `verify` bounding box are computed by different code — 101 × 50 × 32 from
+both — which is the cheapest cross-check available without a third tool.
 
 To reproduce the first one:
 

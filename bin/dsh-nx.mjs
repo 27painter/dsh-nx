@@ -12,6 +12,8 @@ import path from "node:path";
 import { PKG, PKG_ROOT, exists, resolveLayout, configPath } from "../lib/paths.mjs";
 import { explainMissingNx, probeNxResult, resolveNxRoot } from "../lib/nx-root.mjs";
 import { parseRunJournalArgs, runJournal } from "../lib/run-journal.mjs";
+import { verifyPart } from "../lib/verify.mjs";
+import { deliver } from "../lib/deliver.mjs";
 
 const LOG = "[dsh-nx]";
 const say = (m) => console.error(`${LOG} ${m}`);
@@ -318,6 +320,40 @@ function cmdServe() {
   for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => finish(0));
 }
 
+// ------------------------------------------------------------------- mode
+function readProfile() {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(configPath(), "utf8"));
+    return cfg.profile === "half" || cfg.profile === "normal" ? cfg.profile : null;
+  } catch {
+    return null;
+  }
+}
+
+function cmdMode(argv) {
+  const file = configPath();
+  const wanted = argv[0];
+  let cfg = {};
+  try {
+    cfg = JSON.parse(fs.readFileSync(file, "utf8")) || {};
+  } catch {}
+  if (!wanted) {
+    console.log(cfg.profile || "normal");
+    return;
+  }
+  if (wanted !== "normal" && wanted !== "half") {
+    say(`mode takes "normal" or "half" (got ${wanted})`);
+    process.exit(2);
+  }
+  cfg.profile = wanted;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(cfg, null, 2) + "\n", "utf8");
+  say(`delivery profile: ${wanted}`);
+  if (wanted === "half") {
+    say("material, fits and finish must come from lib/standards.json; 审签 and 尺寸链闭合 are still not checked");
+  }
+}
+
 // ------------------------------------------------------------------- main
 const cmd = process.argv[2] || "doctor";
 switch (cmd) {
@@ -348,6 +384,25 @@ switch (cmd) {
     stopBridge(resolveLayout());
     say("stop file written");
     break;
+  case "deliver": {
+    process.exitCode = deliver(process.argv.slice(3));
+    break;
+  }
+  case "mode": {
+    cmdMode(process.argv.slice(3));
+    break;
+  }
+  case "verify": {
+    const args = process.argv.slice(3);
+    // A profile named on the command line wins; otherwise the one saved by
+    // `dsh-nx mode`, so a batch is not asked once per part.
+    if (!args.includes("--profile")) {
+      const saved = readProfile();
+      if (saved) args.push("--profile", saved);
+    }
+    process.exitCode = await verifyPart(args);
+    break;
+  }
   case "run-journal": {
     let parsed;
     try {

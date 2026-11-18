@@ -12,8 +12,8 @@
 不着，因为它要求 Python 3.10+，而 NX 12 内嵌 3.6.1。
 
 NXOpen 跑在 NX 进程内，所以自动化的唯一办法是起一个批处理 NX、把 journal 放进去跑。这个仓库就是
-这层运行时：一套代码覆盖三个版本；一个能告诉你「这次到底成没成」的执行器；以及一个能把版本分清楚
-的探测。
+这层运行时：一套代码覆盖三个版本；一个能告诉你「这次到底成没成」的执行器；一个能把版本分清楚的探测
+——以及从 1.3.0 起，**把零件读回来**：在 NX 里打开、量一遍，和你期望的数字对。
 
 ## 缺的是什么，这里补了什么
 
@@ -144,10 +144,13 @@ New-Item -ItemType Junction -Path $dst -Target $src
 | `nxsrc/nx_mcp/nx_bridge.py` + `bridge.py` | 766 + 872 | 移植后的核心：会话、回环 JSON-RPC、16 个工具实现 |
 | `lib/run-journal.mjs` | 408 | 执行器：解析 NX、运行、判定、杀进程 |
 | `lib/probe.py` | 243 | 找出机器上每一份 NX，并标出各自能干什么 |
-| `bin/dsh-nx.mjs` | 374 | `install` / `doctor` / `where` / `serve` / `run-journal` / `bridge-start` / `bridge-stop` |
+| `bin/dsh-nx.mjs` | 429 | `install` / `doctor` / `where` / `serve` / `run-journal` / `verify` / `deliver` / `mode` / `bridge-start` / `bridge-stop` |
 | `lib/capture.mjs` | 74 | 用文件描述符而不是管道跑子进程 |
 | `lib/nx-root.mjs` + `lib/paths.mjs` | 77 + 71 | 「用哪个 NX」只有一处实现，以及布局默认值 |
 | `install.ps1` | 155 | venv、pinned 技能、junction、`NX_HOME` |
+| `lib/verify_journal.py` + `lib/verify.mjs` | 205 + 227 | 在 NX 里打开 `.prt`，报体数、面数、体积、质量、包围盒；`verify` 拿它和 `--expect-*` 比 |
+| `lib/deliver.mjs` | 282 | 不开 NX 就能查交换文件：STEP 的 schema 与包围盒、STL 三角形、PDF 幅面与文字层 |
+| `lib/standards.json` | — | 半交付判定的取值表（从 `dsh-sw-cad` 复制，同源） |
 | `examples/` | 4 个 journal | 体积自检、冒烟、零件、以及这个零件的 GB A3 工程图 |
 
 `bin/`、`lib/`、`install.ps1` 里的自有代码合计 1,402 行。
@@ -222,6 +225,61 @@ dsh-nx run-journal .\part.py --print-command       # 只打印命令和环境，
 
 **日志是追加的，且只判本次写入的字节**，所以上一次失败会留在盘上，但不会决定下一次的结论。
 
+## 交付检查
+
+`run-journal` 回答的是「journal 跑完了没有」。还有两个命令回答下一个问题。
+
+**`verify` —— 把零件读回来。** `.prt` 是二进制，只有 NX 能读，所以读取发生在 NX 内部：一段小 journal
+打开文件、量一遍、打一行 JSON，`verify` 拿它和你给的值比。
+
+```powershell
+dsh-nx verify part.prt --expect-volume 76223 --tol 0.5
+dsh-nx verify part.prt --expect-bbox 101x50x32 --expect-bodies 1
+```
+
+```
+sw测试  bodies 1, faces 19, edges 47
+  volume 76223.097 mm³   mass 0.596876 kg
+  bbox   101.00 x 50.00 x 32.00 mm
+  ok   volume     76223.097 mm³
+  ok   bodies     1
+OK  11.4s  -> part.verify.json
+```
+
+这是 NX 2406 上的真实零件，11.4 秒（含 NX 自己的启动）。`verify` 会写 `<零件名>.verify.json`：实测值、
+期望值、以及差在哪。
+
+**`deliver` —— 查其他产物。** 不需要 NX：STEP 的 schema 与包围盒、STL 三角形、PDF 幅面与文字层，以及
+一句提醒——`.prt` 在那儿，但几何没被量过。
+
+```powershell
+dsh-nx deliver D:\nx-work --require pdf,step
+```
+
+```
+pdf     sw_test.pdf  48236 B
+  ok   pdf.sheet          297 x 420 mm (A3)
+  ok   pdf.text           font objects present (text layer likely)
+stl     sw_test.stl  67284 B
+  ok   stl.triangles      1344 triangle(s)
+  ok   stl.bbox           bounding box 101.00 x 50.00 x 32.00
+part    sw_test.prt  204099 B
+  warn part.unverified    geometry not read: run `dsh-nx verify` to measure it
+```
+
+**两种模式。** `normal`（默认）查文件本身。`half` 另外要求零件上写的材料、配合、表面处理取自
+`lib/standards.json`；在 NX 里它们通常是部件属性或命名表达式，所以从零件读，而不是从图纸读。没赋材料的
+零件会失败——这正是 NX 自己报的 `NX_MaterialMissingAssignments=TRUE`。
+
+```powershell
+dsh-nx mode half      # 设一次，之后每次 verify 自动沿用
+dsh-nx mode           # 看当前是什么
+```
+
+模式按任务定一次，不按零件问。`verify.json` 会写 `profile` 和仍未检查的项：**半交付的 pass 不是全合规**。
+
+它不查：公差选得对不对（只查是不是取自表里）、材料是否合适、审签、尺寸链闭合。
+
 ## 出问题的时候
 
 这些都是在这台机器上真遇到过的，按症状查：
@@ -289,6 +347,19 @@ NX 12 的程序集重编，而加载未签名 DLL 需要 NX Open .NET 作者许�
 | 故意抛异常 | fail | `uncaught exception (exit 1)` |
 | 接住异常但跑完 | 先 fail，后 ok | 默认是 fail 原因；加 `--allow-traceback` 变 warning |
 | `sleep` 超过 `--timeout 5` | fail | `timeout … killed 4 process(es)`，7.2 秒返回 |
+
+`verify` 和 `deliver` 是对着真实零件和它的导出物验的，不只有构造样例：
+
+| 动作 | 期望 | 实际 |
+|---|---|---|
+| `verify` 跑 `sw测试.prt`（2406） | 量出来 | 1 体、19 面、47 边、76223.097 mm³、0.596876 kg、包围盒 101 × 50 × 32，11.4 秒 |
+| `verify --expect-volume 76223 --expect-bbox 101x50x32 --expect-bodies 1 --tol 0.5` | 通过 | 通过 |
+| `verify --expect-volume 125000 --expect-bodies 2` | 失败 | 失败，两项都点名 |
+| `deliver` 跑同一个目录 | 读导出物 | PDF 297 × 420 mm（A3）且有字体对象；STL 1,344 个三角形、包围盒 101 × 50 × 32 |
+| `verify --profile half` 跑那个零件 | 失败 | 失败：`NX_MaterialMissingAssignments=TRUE`，零件上没有 Ra |
+
+STL 的包围盒和 `verify` 的包围盒是两段完全不同的代码算的——两边都是 101 × 50 × 32，这是没有第三方工具时
+最便宜的一次交叉验证。
 
 复跑第一条：
 
